@@ -8,11 +8,19 @@ const authenticateAgent = async (req, res, next) => {
     }
 
     const server = await db('servers')
-      .where({ agent_api_key: apiKey, agent_installed: true })
+      .where({ agent_api_key: apiKey })
       .first();
 
     if (!server) {
       return res.status(401).json({ error: 'Invalid agent API key' });
+    }
+
+    // Auto-mark agent as installed on first successful connection
+    if (!server.agent_installed) {
+      await db('servers')
+        .where({ id: server.id })
+        .update({ agent_installed: true });
+      server.agent_installed = true;
     }
 
     req.server = server;
