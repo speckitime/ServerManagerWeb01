@@ -86,13 +86,6 @@ export default function ServerLogs() {
 
   return (
     <div className="space-y-6 flex flex-col h-full">
-      <div className="flex items-center gap-3">
-        <Link to={`/servers/${id}`} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-          &larr; Back
-        </Link>
-        <h1 className="text-xl font-bold text-gray-900 dark:text-white">Log Files</h1>
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 flex-1 min-h-0">
         {/* Log file list */}
         <div className="card p-4 lg:col-span-1">

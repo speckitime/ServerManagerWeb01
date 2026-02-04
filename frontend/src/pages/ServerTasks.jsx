@@ -78,12 +78,7 @@ export default function ServerTasks() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link to={`/servers/${id}`} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-            &larr; Back
-          </Link>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">Scheduled Tasks</h1>
-        </div>
+        <div />
         {user?.role !== 'readonly' && (
           <button onClick={() => { setEditTask(null); setShowForm(true); }} className="btn-primary text-sm">
             Create Task

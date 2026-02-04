@@ -8,7 +8,8 @@ export default function Servers() {
   const [servers, setServers] = useState([]);
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showModal, setShowModal] = useState(false);
+  const [editServer, setEditServer] = useState(null);
   const [filter, setFilter] = useState({ search: '', os_type: '', group_id: '', status: '' });
   const user = useAuthStore((s) => s.user);
 
@@ -58,12 +59,22 @@ export default function Servers() {
     }
   };
 
+  const openEdit = async (server) => {
+    try {
+      const { data } = await api.get(`/servers/${server.id}`);
+      setEditServer(data);
+      setShowModal(true);
+    } catch (err) {
+      toast.error('Failed to load server details');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Servers</h1>
         {user?.role === 'admin' && (
-          <button onClick={() => setShowAddModal(true)} className="btn-primary">
+          <button onClick={() => { setEditServer(null); setShowModal(true); }} className="btn-primary">
             Add Server
           </button>
         )}
@@ -79,35 +90,21 @@ export default function Servers() {
             onChange={(e) => setFilter((f) => ({ ...f, search: e.target.value }))}
             className="input-field"
           />
-          <select
-            value={filter.os_type}
-            onChange={(e) => setFilter((f) => ({ ...f, os_type: e.target.value }))}
-            className="input-field"
-          >
+          <select value={filter.os_type} onChange={(e) => setFilter((f) => ({ ...f, os_type: e.target.value }))} className="input-field">
             <option value="">All OS Types</option>
             <option value="linux">Linux</option>
             <option value="windows">Windows</option>
           </select>
-          <select
-            value={filter.status}
-            onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value }))}
-            className="input-field"
-          >
+          <select value={filter.status} onChange={(e) => setFilter((f) => ({ ...f, status: e.target.value }))} className="input-field">
             <option value="">All Status</option>
             <option value="online">Online</option>
             <option value="offline">Offline</option>
             <option value="maintenance">Maintenance</option>
             <option value="error">Error</option>
           </select>
-          <select
-            value={filter.group_id}
-            onChange={(e) => setFilter((f) => ({ ...f, group_id: e.target.value }))}
-            className="input-field"
-          >
+          <select value={filter.group_id} onChange={(e) => setFilter((f) => ({ ...f, group_id: e.target.value }))} className="input-field">
             <option value="">All Groups</option>
-            {groups.map((g) => (
-              <option key={g.id} value={g.id}>{g.name}</option>
-            ))}
+            {groups.map((g) => (<option key={g.id} value={g.id}>{g.name}</option>))}
           </select>
         </div>
       </div>
@@ -129,10 +126,7 @@ export default function Servers() {
                 <div className="flex items-center gap-3">
                   <div className={`h-3 w-3 rounded-full ${statusColor(server.status)}`} />
                   <div>
-                    <Link
-                      to={`/servers/${server.id}`}
-                      className="font-semibold text-gray-900 dark:text-white hover:text-primary-600"
-                    >
+                    <Link to={`/servers/${server.id}`} className="font-semibold text-gray-900 dark:text-white hover:text-primary-600">
                       {server.display_name || server.hostname}
                     </Link>
                     <p className="text-sm text-gray-500 dark:text-gray-400">{server.ip_address}</p>
@@ -144,9 +138,7 @@ export default function Servers() {
               </div>
 
               {server.description && (
-                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 truncate">
-                  {server.description}
-                </p>
+                <p className="mt-2 text-sm text-gray-500 dark:text-gray-400 truncate">{server.description}</p>
               )}
 
               {server.latest_metrics && (
@@ -158,28 +150,16 @@ export default function Servers() {
 
               <div className="mt-4 flex items-center justify-between">
                 <div className="flex gap-2">
-                  <Link
-                    to={`/servers/${server.id}/monitoring`}
-                    className="text-xs text-primary-600 hover:underline"
-                  >
-                    Monitoring
-                  </Link>
+                  <Link to={`/servers/${server.id}/monitoring`} className="text-xs text-primary-600 hover:underline">Monitoring</Link>
                   {server.os_type === 'linux' && (
-                    <Link
-                      to={`/servers/${server.id}/terminal`}
-                      className="text-xs text-primary-600 hover:underline"
-                    >
-                      Terminal
-                    </Link>
+                    <Link to={`/servers/${server.id}/terminal`} className="text-xs text-primary-600 hover:underline">Terminal</Link>
                   )}
                 </div>
                 {user?.role === 'admin' && (
-                  <button
-                    onClick={() => deleteServer(server.id, server.display_name || server.hostname)}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex gap-2">
+                    <button onClick={() => openEdit(server)} className="text-xs text-primary-600 hover:text-primary-700">Edit</button>
+                    <button onClick={() => deleteServer(server.id, server.display_name || server.hostname)} className="text-xs text-red-500 hover:text-red-700">Delete</button>
+                  </div>
                 )}
               </div>
             </div>
@@ -187,14 +167,12 @@ export default function Servers() {
         </div>
       )}
 
-      {showAddModal && (
-        <AddServerModal
+      {showModal && (
+        <ServerFormModal
+          server={editServer}
           groups={groups}
-          onClose={() => setShowAddModal(false)}
-          onAdded={() => {
-            setShowAddModal(false);
-            loadData();
-          }}
+          onClose={() => { setShowModal(false); setEditServer(null); }}
+          onSaved={() => { setShowModal(false); setEditServer(null); loadData(); }}
         />
       )}
     </div>
@@ -204,12 +182,10 @@ export default function Servers() {
 function MetricBar({ label, value }) {
   const pct = Math.min(100, value || 0);
   const color = pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-green-500';
-
   return (
     <div>
       <div className="flex justify-between text-gray-500 dark:text-gray-400">
-        <span>{label}</span>
-        <span>{pct.toFixed(1)}%</span>
+        <span>{label}</span><span>{pct.toFixed(1)}%</span>
       </div>
       <div className="mt-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
         <div className={`h-full ${color} rounded-full`} style={{ width: `${pct}%` }} />
@@ -218,23 +194,26 @@ function MetricBar({ label, value }) {
   );
 }
 
-function AddServerModal({ groups, onClose, onAdded }) {
+function ServerFormModal({ server, groups, onClose, onSaved }) {
+  const isEdit = !!server;
   const [form, setForm] = useState({
-    hostname: '',
-    display_name: '',
-    ip_address: '',
-    os_type: 'linux',
-    os_version: '',
-    description: '',
-    ssh_port: 22,
-    rdp_port: 3389,
-    group_id: '',
+    hostname: server?.hostname || '',
+    display_name: server?.display_name || '',
+    ip_address: server?.ip_address || '',
+    os_type: server?.os_type || 'linux',
+    os_version: server?.os_version || '',
+    description: server?.description || '',
+    ssh_port: server?.ssh_port || 22,
+    rdp_port: server?.rdp_port || 3389,
+    group_id: server?.group_id || '',
     ssh_username: '',
     ssh_password: '',
+    ssh_private_key: '',
     rdp_username: '',
     rdp_password: '',
   });
   const [saving, setSaving] = useState(false);
+  const [showCredentials, setShowCredentials] = useState(!isEdit);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -247,30 +226,31 @@ function AddServerModal({ groups, onClose, onAdded }) {
         os_type: form.os_type,
         os_version: form.os_version,
         description: form.description,
-        ssh_port: form.ssh_port,
-        rdp_port: form.rdp_port,
+        ssh_port: parseInt(form.ssh_port, 10),
+        rdp_port: parseInt(form.rdp_port, 10),
         group_id: form.group_id || null,
       };
 
       if (form.ssh_username) {
-        payload.ssh_credentials = {
-          username: form.ssh_username,
-          password: form.ssh_password,
-        };
+        payload.ssh_credentials = { username: form.ssh_username, password: form.ssh_password };
       }
-
+      if (form.ssh_private_key) {
+        payload.ssh_private_key = form.ssh_private_key;
+      }
       if (form.rdp_username) {
-        payload.rdp_credentials = {
-          username: form.rdp_username,
-          password: form.rdp_password,
-        };
+        payload.rdp_credentials = { username: form.rdp_username, password: form.rdp_password };
       }
 
-      await api.post('/servers', payload);
-      toast.success('Server added successfully');
-      onAdded();
+      if (isEdit) {
+        await api.put(`/servers/${server.id}`, payload);
+        toast.success('Server updated');
+      } else {
+        await api.post('/servers', payload);
+        toast.success('Server added');
+      }
+      onSaved();
     } catch (err) {
-      toast.error(err.response?.data?.error || 'Failed to add server');
+      toast.error(err.response?.data?.error || `Failed to ${isEdit ? 'update' : 'add'} server`);
     } finally {
       setSaving(false);
     }
@@ -279,8 +259,9 @@ function AddServerModal({ groups, onClose, onAdded }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="card w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Add Server</h2>
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{isEdit ? 'Edit Server' : 'Add Server'}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl">&times;</button>
         </div>
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -293,7 +274,6 @@ function AddServerModal({ groups, onClose, onAdded }) {
               <input type="text" className="input-field" value={form.display_name} onChange={(e) => setForm({ ...form, display_name: e.target.value })} />
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IP Address *</label>
@@ -307,7 +287,6 @@ function AddServerModal({ groups, onClose, onAdded }) {
               </select>
             </div>
           </div>
-
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">OS Version</label>
@@ -321,56 +300,66 @@ function AddServerModal({ groups, onClose, onAdded }) {
               </select>
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
             <textarea className="input-field" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </div>
 
-          {form.os_type === 'linux' && (
-            <fieldset className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-              <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 px-1">SSH Credentials</legend>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Username</label>
-                  <input type="text" className="input-field" value={form.ssh_username} onChange={(e) => setForm({ ...form, ssh_username: e.target.value })} />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Password</label>
-                  <input type="password" className="input-field" value={form.ssh_password} onChange={(e) => setForm({ ...form, ssh_password: e.target.value })} />
-                </div>
-              </div>
-              <div className="mt-2">
-                <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">SSH Port</label>
-                <input type="number" className="input-field w-32" value={form.ssh_port} onChange={(e) => setForm({ ...form, ssh_port: parseInt(e.target.value, 10) })} />
-              </div>
-            </fieldset>
-          )}
-
-          {form.os_type === 'windows' && (
-            <fieldset className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
-              <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 px-1">RDP Credentials</legend>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Username</label>
-                  <input type="text" className="input-field" value={form.rdp_username} onChange={(e) => setForm({ ...form, rdp_username: e.target.value })} />
-                </div>
-                <div>
-                  <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Password</label>
-                  <input type="password" className="input-field" value={form.rdp_password} onChange={(e) => setForm({ ...form, rdp_password: e.target.value })} />
-                </div>
-              </div>
-              <div className="mt-2">
-                <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">RDP Port</label>
-                <input type="number" className="input-field w-32" value={form.rdp_port} onChange={(e) => setForm({ ...form, rdp_port: parseInt(e.target.value, 10) })} />
-              </div>
-            </fieldset>
+          {isEdit && !showCredentials ? (
+            <button type="button" onClick={() => setShowCredentials(true)} className="text-sm text-primary-600 hover:text-primary-700">
+              Change credentials...
+            </button>
+          ) : (
+            <>
+              {form.os_type === 'linux' && (
+                <fieldset className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                  <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 px-1">SSH Credentials {isEdit && '(leave empty to keep current)'}</legend>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Username</label>
+                      <input type="text" className="input-field" value={form.ssh_username} onChange={(e) => setForm({ ...form, ssh_username: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Password</label>
+                      <input type="password" className="input-field" value={form.ssh_password} onChange={(e) => setForm({ ...form, ssh_password: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="mt-3">
+                    <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">SSH Private Key (PEM)</label>
+                    <textarea className="input-field font-mono text-xs" rows={4} placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n..."} value={form.ssh_private_key} onChange={(e) => setForm({ ...form, ssh_private_key: e.target.value })} />
+                  </div>
+                  <div className="mt-2">
+                    <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">SSH Port</label>
+                    <input type="number" className="input-field w-32" value={form.ssh_port} onChange={(e) => setForm({ ...form, ssh_port: e.target.value })} />
+                  </div>
+                </fieldset>
+              )}
+              {form.os_type === 'windows' && (
+                <fieldset className="border border-gray-200 dark:border-gray-600 rounded-lg p-4">
+                  <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 px-1">RDP Credentials {isEdit && '(leave empty to keep current)'}</legend>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Username</label>
+                      <input type="text" className="input-field" value={form.rdp_username} onChange={(e) => setForm({ ...form, rdp_username: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Password</label>
+                      <input type="password" className="input-field" value={form.rdp_password} onChange={(e) => setForm({ ...form, rdp_password: e.target.value })} />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">RDP Port</label>
+                    <input type="number" className="input-field w-32" value={form.rdp_port} onChange={(e) => setForm({ ...form, rdp_port: e.target.value })} />
+                  </div>
+                </fieldset>
+              )}
+            </>
           )}
 
           <div className="flex justify-end gap-3 pt-4">
             <button type="button" onClick={onClose} className="btn-secondary">Cancel</button>
             <button type="submit" disabled={saving} className="btn-primary">
-              {saving ? 'Adding...' : 'Add Server'}
+              {saving ? 'Saving...' : isEdit ? 'Update Server' : 'Add Server'}
             </button>
           </div>
         </form>

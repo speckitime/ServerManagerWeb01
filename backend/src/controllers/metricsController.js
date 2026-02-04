@@ -99,6 +99,33 @@ exports.ingestFromAgent = async (req, res) => {
       .where({ id: server.id })
       .update({ status: 'online', last_seen: new Date() });
 
+    // Broadcast metrics to subscribed frontend clients in real-time
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`server:${server.id}`).emit('server_metrics', {
+        server_id: server.id,
+        cpu_usage,
+        ram_total,
+        ram_used,
+        ram_usage_percent,
+        disk_partitions,
+        network_rx_bytes,
+        network_tx_bytes,
+        load_avg_1,
+        load_avg_5,
+        load_avg_15,
+        process_count,
+        top_processes,
+        uptime_seconds,
+      });
+
+      // Also broadcast status update
+      io.to(`server:${server.id}`).emit('server_status', {
+        server_id: server.id,
+        status: 'online',
+      });
+    }
+
     // Clean up old metrics (keep 30 days)
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     await db('server_metrics')
