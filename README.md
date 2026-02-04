@@ -62,8 +62,8 @@ A web-based server management system with agent-based architecture for centrally
 ### One-Click Installation (Debian/Ubuntu)
 
 ```bash
-git clone [https://github.com/your-repo/servermanager.git](https://github.com/speckitime/ServerManagerWeb01.git)
-cd servermanager
+git clone https://github.com/speckitime/ServerManagerWeb01.git
+cd ServerManagerWeb01
 sudo bash installer/install.sh
 ```
 
