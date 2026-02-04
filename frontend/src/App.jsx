@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import useAuthStore from './store/authStore';
 import Layout from './components/layout/Layout';
+import ServerLayout from './components/layout/ServerLayout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Servers from './pages/Servers';
@@ -51,29 +52,26 @@ export default function App() {
       >
         <Route index element={<Dashboard />} />
         <Route path="servers" element={<Servers />} />
-        <Route path="servers/:id" element={<ServerDetail />} />
-        <Route path="servers/:id/terminal" element={<ServerTerminal />} />
-        <Route path="servers/:id/monitoring" element={<ServerMonitoring />} />
-        <Route path="servers/:id/packages" element={<ServerPackages />} />
-        <Route path="servers/:id/logs" element={<ServerLogs />} />
-        <Route path="servers/:id/tasks" element={<ServerTasks />} />
-        <Route path="servers/:id/documents" element={<ServerDocuments />} />
+
+        {/* Server sub-pages with persistent tab navigation */}
+        <Route path="servers/:id" element={<ServerLayout />}>
+          <Route index element={<ServerDetail />} />
+          <Route path="terminal" element={<ServerTerminal />} />
+          <Route path="monitoring" element={<ServerMonitoring />} />
+          <Route path="packages" element={<ServerPackages />} />
+          <Route path="logs" element={<ServerLogs />} />
+          <Route path="tasks" element={<ServerTasks />} />
+          <Route path="documents" element={<ServerDocuments />} />
+        </Route>
+
         <Route
           path="users"
-          element={
-            <AdminRoute>
-              <Users />
-            </AdminRoute>
-          }
+          element={<AdminRoute><Users /></AdminRoute>}
         />
         <Route path="ips" element={<IpOverview />} />
         <Route
           path="activity"
-          element={
-            <AdminRoute>
-              <ActivityLog />
-            </AdminRoute>
-          }
+          element={<AdminRoute><ActivityLog /></AdminRoute>}
         />
         <Route path="profile" element={<Profile />} />
       </Route>

@@ -64,41 +64,11 @@ export default function ServerDetail() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-              {server.display_name || server.hostname}
-            </h1>
-            {statusBadge(server.status)}
-          </div>
-          <p className="text-gray-500 dark:text-gray-400 mt-1">
-            {server.ip_address} &middot; {server.os_type} {server.os_version}
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          <Link to={`/servers/${id}/monitoring`} className="btn-primary text-sm">
-            Monitoring
-          </Link>
-          {server.os_type === 'linux' && (
-            <Link to={`/servers/${id}/terminal`} className="btn-secondary text-sm">
-              SSH Terminal
-            </Link>
-          )}
-          <Link to={`/servers/${id}/packages`} className="btn-secondary text-sm">
-            Packages
-          </Link>
-          <Link to={`/servers/${id}/logs`} className="btn-secondary text-sm">
-            Logs
-          </Link>
-          <Link to={`/servers/${id}/tasks`} className="btn-secondary text-sm">
-            Tasks
-          </Link>
-          <Link to={`/servers/${id}/documents`} className="btn-secondary text-sm">
-            Docs
-          </Link>
-        </div>
+      <div className="flex items-center gap-3">
+        {statusBadge(server.status)}
+        <span className="text-sm text-gray-500 dark:text-gray-400">
+          {server.os_type} {server.os_version}
+        </span>
       </div>
 
       {/* Info cards */}

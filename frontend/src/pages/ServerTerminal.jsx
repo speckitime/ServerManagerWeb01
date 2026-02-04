@@ -148,12 +148,9 @@ export default function ServerTerminal() {
   return (
     <div className="space-y-4 h-full flex flex-col">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <Link to={`/servers/${id}`} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-            &larr; Back
-          </Link>
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">SSH Terminal</h1>
+        <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`} />
+          <span className="text-sm text-gray-500 dark:text-gray-400">{connected ? 'Connected' : 'Disconnected'}</span>
         </div>
         {!connected && !connecting && (
           <button onClick={reconnect} className="btn-primary text-sm">

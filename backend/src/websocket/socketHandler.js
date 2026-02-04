@@ -86,13 +86,17 @@ module.exports = (io) => {
           return;
         }
 
-        let credentials;
+        let credentials = null;
         if (server.ssh_credentials_encrypted) {
-          credentials = decryptCredentials(server.ssh_credentials_encrypted);
+          try {
+            credentials = decryptCredentials(server.ssh_credentials_encrypted);
+          } catch (e) {
+            logger.error('Failed to decrypt SSH credentials:', e);
+          }
         }
 
-        if (!credentials) {
-          socket.emit('ssh_error', { error: 'No SSH credentials configured' });
+        if (!credentials || !credentials.username) {
+          socket.emit('ssh_error', { error: 'No SSH credentials configured. Edit the server to add SSH username/password or a private key.' });
           return;
         }
 
@@ -101,15 +105,37 @@ module.exports = (io) => {
           host: server.ip_address,
           port: server.ssh_port || 22,
           username: credentials.username,
+          readyTimeout: 10000,
+          algorithms: {
+            kex: [
+              'curve25519-sha256',
+              'curve25519-sha256@libssh.org',
+              'ecdh-sha2-nistp256',
+              'ecdh-sha2-nistp384',
+              'ecdh-sha2-nistp521',
+              'diffie-hellman-group-exchange-sha256',
+              'diffie-hellman-group14-sha256',
+              'diffie-hellman-group14-sha1',
+            ],
+          },
         };
 
+        // Try private key first, then password
         if (server.ssh_private_key_encrypted) {
-          const keyData = decryptCredentials(server.ssh_private_key_encrypted);
-          sshConfig.privateKey = keyData.key;
-          if (credentials.passphrase) {
-            sshConfig.passphrase = credentials.passphrase;
+          try {
+            const keyData = decryptCredentials(server.ssh_private_key_encrypted);
+            if (keyData && keyData.key) {
+              sshConfig.privateKey = keyData.key;
+              if (credentials.passphrase) {
+                sshConfig.passphrase = credentials.passphrase;
+              }
+            }
+          } catch (e) {
+            logger.error('Failed to decrypt SSH key:', e);
           }
-        } else if (credentials.password) {
+        }
+
+        if (credentials.password) {
           sshConfig.password = credentials.password;
         }
 
