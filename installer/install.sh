@@ -241,14 +241,27 @@ fi
 
 echo -e "${YELLOW}[6/10] Deploying application...${NC}"
 
-mkdir -p "$APP_DIR"
-
-# Copy application files (assuming this is run from the repo)
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
-cp -r "$REPO_DIR/backend" "$APP_DIR/"
-cp -r "$REPO_DIR/frontend" "$APP_DIR/"
+# Detect if running from a git repo – if so, clone it so updates via git pull work
+if [ -d "$REPO_DIR/.git" ]; then
+    REPO_URL=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null || true)
+    REPO_BRANCH=$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+fi
+
+if [ -n "$REPO_URL" ]; then
+    echo "  Cloning from $REPO_URL (branch: $REPO_BRANCH)..."
+    rm -rf "$APP_DIR"
+    git clone --branch "$REPO_BRANCH" "$REPO_URL" "$APP_DIR"
+else
+    echo "  No git remote detected – copying files..."
+    mkdir -p "$APP_DIR"
+    cp -r "$REPO_DIR/backend" "$APP_DIR/"
+    cp -r "$REPO_DIR/frontend" "$APP_DIR/"
+    # Init a local git repo so git pull can be used later if remote is added
+    git -C "$APP_DIR" init -q 2>/dev/null || true
+fi
 
 # Create uploads directory
 mkdir -p "$APP_DIR/backend/uploads/documents"
