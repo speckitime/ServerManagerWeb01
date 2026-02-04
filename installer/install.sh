@@ -161,9 +161,12 @@ echo "  Database '${DB_NAME}' created"
 #------------------------------------------------------------
 
 echo -e "${YELLOW}[5/10] Installing and configuring Nginx...${NC}"
-apt-get install -y -qq nginx
 
-# Create Nginx config
+# Pre-create config dirs so we can drop our config before nginx starts for the first time
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+
+# Write our vhost config BEFORE installing nginx so the default site never
+# gets a chance to fail on systems without IPv6 support.
 cat > /etc/nginx/sites-available/servermanager << NGINXEOF
 server {
     listen 80;
@@ -197,9 +200,23 @@ server {
 }
 NGINXEOF
 
-# Enable site
-rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/servermanager /etc/nginx/sites-enabled/
+
+# Install nginx (may fail to start due to default IPv6 vhost – we fix that below)
+apt-get install -y -qq nginx || true
+
+# Remove the default site which listens on [::]:80 and breaks on systems without IPv6
+rm -f /etc/nginx/sites-enabled/default
+
+# Patch the main nginx.conf: disable IPv6 listen directives if the kernel
+# does not support the IPv6 address family.
+if [ ! -d /proc/sys/net/ipv6 ]; then
+    echo "  IPv6 not available – removing IPv6 listen directives from nginx config"
+    # Remove any "listen [::]:..." lines in all nginx configs
+    sed -i '/listen\s*\[::\]/d' /etc/nginx/nginx.conf
+    find /etc/nginx/sites-enabled/ -type f -exec sed -i '/listen\s*\[::\]/d' {} +
+    find /etc/nginx/conf.d/ -type f -name '*.conf' -exec sed -i '/listen\s*\[::\]/d' {} + 2>/dev/null || true
+fi
 
 nginx -t
 systemctl enable nginx
