@@ -38,6 +38,9 @@ module.exports = (io) => {
   io.on('connection', (socket) => {
     logger.info(`User ${socket.user.username} connected via WebSocket`);
 
+    // Store multiple SSH sessions per socket: Map<sessionId, {conn, stream}>
+    socket._sshSessions = new Map();
+
     // Join server rooms for real-time updates
     socket.on('subscribe_server', async (serverId) => {
       try {
@@ -59,10 +62,11 @@ module.exports = (io) => {
       socket.leave(`server:${serverId}`);
     });
 
-    // SSH Terminal
+    // SSH Terminal - supports multiple sessions via sessionId
     socket.on('ssh_connect', async (data) => {
       try {
-        const { serverId } = data;
+        const { serverId, sessionId } = data;
+        const sid = sessionId || 'default';
 
         // Check access
         if (socket.user.role !== 'admin') {
@@ -70,19 +74,19 @@ module.exports = (io) => {
             .where({ user_id: socket.user.id, server_id: serverId })
             .first();
           if (!access) {
-            socket.emit('ssh_error', { error: 'Access denied' });
+            socket.emit('ssh_error', { error: 'Access denied', sessionId: sid });
             return;
           }
         }
 
         const server = await db('servers').where({ id: serverId }).first();
         if (!server) {
-          socket.emit('ssh_error', { error: 'Server not found' });
+          socket.emit('ssh_error', { error: 'Server not found', sessionId: sid });
           return;
         }
 
         if (server.os_type !== 'linux') {
-          socket.emit('ssh_error', { error: 'SSH only available for Linux servers' });
+          socket.emit('ssh_error', { error: 'SSH only available for Linux servers', sessionId: sid });
           return;
         }
 
@@ -96,8 +100,16 @@ module.exports = (io) => {
         }
 
         if (!credentials || !credentials.username) {
-          socket.emit('ssh_error', { error: 'No SSH credentials configured. Edit the server to add SSH username/password or a private key.' });
+          socket.emit('ssh_error', { error: 'No SSH credentials configured. Edit the server to add SSH username/password or a private key.', sessionId: sid });
           return;
+        }
+
+        // Close existing session with same ID if any
+        if (socket._sshSessions.has(sid)) {
+          const old = socket._sshSessions.get(sid);
+          try { old.stream?.close(); } catch (e) {}
+          try { old.conn?.end(); } catch (e) {}
+          socket._sshSessions.delete(sid);
         }
 
         const sshConn = new SSHClient();
@@ -120,7 +132,6 @@ module.exports = (io) => {
           },
         };
 
-        // Try private key first, then password
         if (server.ssh_private_key_encrypted) {
           try {
             const keyData = decryptCredentials(server.ssh_private_key_encrypted);
@@ -140,45 +151,46 @@ module.exports = (io) => {
         }
 
         sshConn.on('ready', () => {
-          socket.emit('ssh_connected');
+          socket.emit('ssh_connected', { sessionId: sid });
 
           sshConn.shell(
             { term: 'xterm-256color', cols: data.cols || 80, rows: data.rows || 24 },
             (err, stream) => {
               if (err) {
-                socket.emit('ssh_error', { error: err.message });
+                socket.emit('ssh_error', { error: err.message, sessionId: sid });
                 return;
               }
 
-              socket._sshStream = stream;
-              socket._sshConn = sshConn;
+              // Store the session
+              socket._sshSessions.set(sid, { conn: sshConn, stream });
 
-              stream.on('data', (data) => {
-                socket.emit('ssh_data', data.toString('utf8'));
+              stream.on('data', (chunk) => {
+                socket.emit('ssh_data', { sessionId: sid, data: chunk.toString('utf8') });
               });
 
               stream.on('close', () => {
-                socket.emit('ssh_closed');
+                socket.emit('ssh_closed', { sessionId: sid });
                 sshConn.end();
+                socket._sshSessions.delete(sid);
               });
 
-              stream.stderr.on('data', (data) => {
-                socket.emit('ssh_data', data.toString('utf8'));
+              stream.stderr.on('data', (chunk) => {
+                socket.emit('ssh_data', { sessionId: sid, data: chunk.toString('utf8') });
               });
             }
           );
 
-          // Log SSH connection
           db('activity_logs').insert({
             user_id: socket.user.id,
             server_id: serverId,
             action: 'ssh_connected',
-            details: `SSH connection to ${server.hostname}`,
+            details: `SSH connection to ${server.hostname} (session: ${sid})`,
           }).catch((err) => logger.error('Activity log error:', err));
         });
 
         sshConn.on('error', (err) => {
-          socket.emit('ssh_error', { error: err.message });
+          socket.emit('ssh_error', { error: err.message, sessionId: sid });
+          socket._sshSessions.delete(sid);
         });
 
         sshConn.connect(sshConfig);
@@ -188,35 +200,48 @@ module.exports = (io) => {
       }
     });
 
-    socket.on('ssh_data', (data) => {
-      if (socket._sshStream) {
-        socket._sshStream.write(data);
+    socket.on('ssh_data', (payload) => {
+      // Support both { sessionId, data } and legacy plain string
+      let sid, inputData;
+      if (typeof payload === 'object' && payload !== null && payload.data !== undefined) {
+        sid = payload.sessionId || 'default';
+        inputData = payload.data;
+      } else {
+        sid = 'default';
+        inputData = payload;
+      }
+
+      const session = socket._sshSessions.get(sid);
+      if (session && session.stream) {
+        session.stream.write(inputData);
       }
     });
 
-    socket.on('ssh_resize', (data) => {
-      if (socket._sshStream) {
-        socket._sshStream.setWindow(data.rows, data.cols, data.height, data.width);
+    socket.on('ssh_resize', (payload) => {
+      const sid = payload?.sessionId || 'default';
+      const session = socket._sshSessions.get(sid);
+      if (session && session.stream) {
+        session.stream.setWindow(payload.rows, payload.cols, payload.height || 0, payload.width || 0);
       }
     });
 
-    socket.on('ssh_disconnect', () => {
-      if (socket._sshStream) {
-        socket._sshStream.close();
-      }
-      if (socket._sshConn) {
-        socket._sshConn.end();
+    socket.on('ssh_disconnect', (payload) => {
+      const sid = (typeof payload === 'object' ? payload?.sessionId : null) || 'default';
+      const session = socket._sshSessions.get(sid);
+      if (session) {
+        try { session.stream?.close(); } catch (e) {}
+        try { session.conn?.end(); } catch (e) {}
+        socket._sshSessions.delete(sid);
       }
     });
 
     socket.on('disconnect', () => {
       logger.info(`User ${socket.user.username} disconnected`);
-      if (socket._sshStream) {
-        socket._sshStream.close();
+      for (const [, session] of socket._sshSessions) {
+        try { session.stream?.close(); } catch (e) {}
+        try { session.conn?.end(); } catch (e) {}
       }
-      if (socket._sshConn) {
-        socket._sshConn.end();
-      }
+      socket._sshSessions.clear();
     });
   });
 
@@ -251,7 +276,6 @@ module.exports = (io) => {
 
     socket.join(`agent:${server.id}`);
 
-    // Update server status
     db('servers')
       .where({ id: server.id })
       .update({ status: 'online', last_seen: new Date(), agent_installed: true })
@@ -270,7 +294,6 @@ module.exports = (io) => {
           .where({ id: server.id })
           .update({ last_seen: new Date() });
 
-        // Forward to subscribed users
         io.to(`server:${server.id}`).emit('server_metrics', {
           server_id: server.id,
           ...data,

@@ -93,6 +93,17 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Version info
+app.get('/api/version', (req, res) => {
+  try {
+    const versionFile = path.join(__dirname, '../../version.json');
+    const version = require(versionFile);
+    res.json(version);
+  } catch (err) {
+    res.json({ version: 'unknown' });
+  }
+});
+
 // Error handler
 app.use((err, req, res, _next) => {
   logger.error('Unhandled error:', err);
