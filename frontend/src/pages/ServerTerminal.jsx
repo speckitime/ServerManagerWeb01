@@ -113,10 +113,12 @@ function TerminalTab({ serverId, session, isActive, onActivate, onClose, canClos
       // Clean up socket listeners for this session
       if (socketListenersRef.current) {
         const socket = getSocket();
-        socket.off(`ssh_data_${session.id}`);
-        socket.off(`ssh_connected_${session.id}`);
-        socket.off(`ssh_error_${session.id}`);
-        socket.off(`ssh_closed_${session.id}`);
+        const { onConnected, onData, onError, onClosed } = socketListenersRef.current;
+        socket.off('ssh_connected', onConnected);
+        socket.off('ssh_data', onData);
+        socket.off('ssh_error', onError);
+        socket.off('ssh_closed', onClosed);
+        socketListenersRef.current = null;
       }
     };
   }, [isActive, session.id]);
@@ -133,53 +135,53 @@ function TerminalTab({ serverId, session, isActive, onActivate, onClose, canClos
   const connectSSH = useCallback((term, fitAddon) => {
     setConnecting(true);
     const socket = getSocket();
-
-    // Use session-specific events
-    const eventPrefix = session.id;
+    const sid = session.id;
 
     socket.emit('ssh_connect', {
       serverId,
-      sessionId: session.id,
+      sessionId: sid,
       cols: term.cols,
       rows: term.rows,
     });
 
-    const onConnected = () => {
+    const onConnected = (payload) => {
+      if (payload?.sessionId && payload.sessionId !== sid) return;
       setConnected(true);
       setConnecting(false);
       setError(null);
 
       term.onData((data) => {
-        socket.emit('ssh_data', { sessionId: session.id, data });
+        socket.emit('ssh_data', { sessionId: sid, data });
       });
 
       term.onResize(({ cols, rows }) => {
-        socket.emit('ssh_resize', { sessionId: session.id, cols, rows });
+        socket.emit('ssh_resize', { sessionId: sid, cols, rows });
       });
     };
 
-    const onData = (data) => {
-      term.write(data);
-      appendBuffer(serverId, session.id, data);
+    const onData = (payload) => {
+      // Backend sends { sessionId, data } - filter by session
+      if (typeof payload === 'object' && payload.sessionId && payload.sessionId !== sid) return;
+      const text = typeof payload === 'object' ? payload.data : payload;
+      if (text) {
+        term.write(text);
+        appendBuffer(serverId, sid, text);
+      }
     };
 
-    const onError = (data) => {
+    const onError = (payload) => {
+      if (payload?.sessionId && payload.sessionId !== sid) return;
       setConnecting(false);
-      setError(data.error);
-      term.writeln(`\r\n\x1b[31mError: ${data.error}\x1b[0m`);
+      setError(payload.error || 'Unknown error');
+      term.writeln(`\r\n\x1b[31mError: ${payload.error || 'Unknown error'}\x1b[0m`);
     };
 
-    const onClosed = () => {
+    const onClosed = (payload) => {
+      if (payload?.sessionId && payload.sessionId !== sid) return;
       setConnected(false);
       term.writeln('\r\n\x1b[33mConnection closed\x1b[0m');
     };
 
-    socket.on(`ssh_connected_${eventPrefix}`, onConnected);
-    socket.on(`ssh_data_${eventPrefix}`, onData);
-    socket.on(`ssh_error_${eventPrefix}`, onError);
-    socket.on(`ssh_closed_${eventPrefix}`, onClosed);
-
-    // Fallback: also listen to non-prefixed events for backward compatibility
     socket.on('ssh_connected', onConnected);
     socket.on('ssh_data', onData);
     socket.on('ssh_error', onError);

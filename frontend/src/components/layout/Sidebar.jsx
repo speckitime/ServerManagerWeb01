@@ -1,5 +1,7 @@
+import { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import useAuthStore from '../../store/authStore';
+import api from '../../services/api';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: DashboardIcon },
@@ -12,6 +14,11 @@ const navigation = [
 
 export default function Sidebar({ open, onClose }) {
   const user = useAuthStore((s) => s.user);
+  const [version, setVersion] = useState('');
+
+  useEffect(() => {
+    api.get('/version').then(({ data }) => setVersion(data.version || '')).catch(() => {});
+  }, []);
 
   const filteredNav = navigation.filter(
     (item) => !item.adminOnly || user?.role === 'admin'
@@ -70,6 +77,9 @@ export default function Sidebar({ open, onClose }) {
               <p className="text-xs text-gray-400 truncate">{user?.role}</p>
             </div>
           </div>
+          {version && (
+            <p className="text-xs text-gray-600 mt-3 text-center">v{version}</p>
+          )}
         </div>
       </aside>
     </>
