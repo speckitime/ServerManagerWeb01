@@ -17,6 +17,7 @@ import Users from './pages/Users';
 import IpOverview from './pages/IpOverview';
 import ActivityLog from './pages/ActivityLog';
 import Profile from './pages/Profile';
+import Scripts from './pages/Scripts';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -64,6 +65,10 @@ export default function App() {
           <Route path="documents" element={<ServerDocuments />} />
         </Route>
 
+        <Route
+          path="scripts"
+          element={<AdminRoute><Scripts /></AdminRoute>}
+        />
         <Route
           path="users"
           element={<AdminRoute><Users /></AdminRoute>}
