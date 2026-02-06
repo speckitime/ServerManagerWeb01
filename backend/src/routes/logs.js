@@ -4,15 +4,9 @@ const logController = require('../controllers/logController');
 const { authenticate, authorizeServerAccess } = require('../middleware/auth');
 const { authenticateAgent } = require('../middleware/agentAuth');
 
-// User routes - get configured logs for a server
-router.get(
-  '/servers/:serverId/logs',
-  authenticate,
-  authorizeServerAccess,
-  logController.getLogFiles
-);
+// IMPORTANT: More specific routes must come BEFORE less specific ones
 
-// Get available log templates
+// Get available log templates (specific path - must be before /logs)
 router.get(
   '/servers/:serverId/logs/templates',
   authenticate,
@@ -20,7 +14,7 @@ router.get(
   logController.getLogTemplates
 );
 
-// Auto-detect available logs on server
+// Auto-detect available logs on server (specific path - must be before /logs)
 router.get(
   '/servers/:serverId/logs/detect',
   authenticate,
@@ -28,15 +22,7 @@ router.get(
   logController.detectLogs
 );
 
-// Add a single log path
-router.post(
-  '/servers/:serverId/logs',
-  authenticate,
-  authorizeServerAccess,
-  logController.addLogPath
-);
-
-// Add multiple logs at once
+// Add multiple logs at once (specific path - must be before /logs)
 router.post(
   '/servers/:serverId/logs/bulk',
   authenticate,
@@ -44,7 +30,7 @@ router.post(
   logController.addMultipleLogs
 );
 
-// Request log content via SSH
+// Request log content via SSH (specific path - must be before /logs)
 router.post(
   '/servers/:serverId/logs/request',
   authenticate,
@@ -52,12 +38,28 @@ router.post(
   logController.requestLogContent
 );
 
-// Remove a log path
+// Remove a log path (has :logId param)
 router.delete(
   '/servers/:serverId/logs/:logId',
   authenticate,
   authorizeServerAccess,
   logController.removeLogPath
+);
+
+// Get configured logs for a server (base route - must be LAST)
+router.get(
+  '/servers/:serverId/logs',
+  authenticate,
+  authorizeServerAccess,
+  logController.getLogFiles
+);
+
+// Add a single log path (base route - must be LAST)
+router.post(
+  '/servers/:serverId/logs',
+  authenticate,
+  authorizeServerAccess,
+  logController.addLogPath
 );
 
 // Agent routes (legacy)
