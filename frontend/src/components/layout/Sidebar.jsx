@@ -43,7 +43,10 @@ export default function Sidebar({ open, onClose }) {
           <svg className="h-8 w-8 text-primary-500" viewBox="0 0 24 24" fill="currentColor">
             <path d="M4.08 5.227A3 3 0 016.979 3H17.02a3 3 0 012.9 2.227l2.113 7.926A5.228 5.228 0 0018.75 12H5.25a5.228 5.228 0 00-3.284 1.153L4.08 5.227zM24 15.75a5.25 5.25 0 01-5.25 5.25H5.25A5.25 5.25 0 010 15.75v-.938a4.5 4.5 0 014.5-4.5h15a4.5 4.5 0 014.5 4.5v.938z" />
           </svg>
-          <span className="text-lg font-bold text-white">ServerManager</span>
+          <div className="flex flex-col">
+            <span className="text-lg font-bold text-white">ServerManager</span>
+            {version && <span className="text-xs text-primary-400">v{version}</span>}
+          </div>
         </div>
 
         <nav className="mt-4 px-3 space-y-1">
@@ -77,9 +80,6 @@ export default function Sidebar({ open, onClose }) {
               <p className="text-xs text-gray-400 truncate">{user?.role}</p>
             </div>
           </div>
-          {version && (
-            <p className="text-xs text-gray-600 mt-3 text-center">v{version}</p>
-          )}
         </div>
       </aside>
     </>
