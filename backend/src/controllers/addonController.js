@@ -15,13 +15,24 @@ exports.getAllAddons = async (req, res) => {
     const addons = await db('addons').orderBy('category').orderBy('name');
     res.json(addons.map(a => ({
       ...a,
-      default_config: a.default_config ? JSON.parse(a.default_config) : {}
+      default_config: parseJsonField(a.default_config)
     })));
   } catch (err) {
     logger.error('Get all addons error:', err);
     res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 };
+
+// Helper to safely parse JSON fields that might be objects, strings, or corrupted
+function parseJsonField(value) {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  try {
+    return JSON.parse(value);
+  } catch (e) {
+    return {};
+  }
+}
 
 // Get single addon details
 exports.getAddon = async (req, res) => {
@@ -30,7 +41,7 @@ exports.getAddon = async (req, res) => {
     if (!addon) {
       return res.status(404).json({ error: 'Addon not found' });
     }
-    addon.default_config = addon.default_config ? JSON.parse(addon.default_config) : {};
+    addon.default_config = parseJsonField(addon.default_config);
     res.json(addon);
   } catch (err) {
     logger.error('Get addon error:', err);
@@ -91,8 +102,8 @@ exports.getServerAddons = async (req, res) => {
 
     res.json(addons.map(a => ({
       ...a,
-      default_config: a.default_config ? JSON.parse(a.default_config) : {},
-      server_config: a.server_config ? JSON.parse(a.server_config) : null,
+      default_config: parseJsonField(a.default_config),
+      server_config: parseJsonField(a.server_config),
       is_installed: a.server_enabled !== null,
       server_enabled: a.server_enabled ?? false
     })));
