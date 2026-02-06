@@ -23,7 +23,9 @@ export default function Addons() {
       const { data } = await api.get('/addons');
       setAddons(data);
     } catch (err) {
-      toast.error('Failed to load addons');
+      const msg = err.response?.data?.error || err.message || 'Unknown error';
+      console.error('Failed to load addons:', err.response?.status, msg);
+      toast.error('Failed to load addons: ' + msg);
     } finally {
       setLoading(false);
     }
