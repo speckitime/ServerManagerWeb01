@@ -6,6 +6,12 @@ const logger = require('../services/logger');
 // Get all available addons (admin)
 exports.getAllAddons = async (req, res) => {
   try {
+    // Check if table exists
+    const tableExists = await db.schema.hasTable('addons');
+    if (!tableExists) {
+      return res.json([]);
+    }
+
     const addons = await db('addons').orderBy('category').orderBy('name');
     res.json(addons.map(a => ({
       ...a,
@@ -13,7 +19,7 @@ exports.getAllAddons = async (req, res) => {
     })));
   } catch (err) {
     logger.error('Get all addons error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 };
 
@@ -59,6 +65,12 @@ exports.getServerAddons = async (req, res) => {
   try {
     const serverId = req.params.serverId;
 
+    // Check if tables exist
+    const addonsTableExists = await db.schema.hasTable('addons');
+    if (!addonsTableExists) {
+      return res.json([]);
+    }
+
     // Get all globally enabled addons with server-specific status
     const addons = await db('addons')
       .where('addons.is_enabled', true)
@@ -86,7 +98,7 @@ exports.getServerAddons = async (req, res) => {
     })));
   } catch (err) {
     logger.error('Get server addons error:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: 'Internal server error: ' + err.message });
   }
 };
 
