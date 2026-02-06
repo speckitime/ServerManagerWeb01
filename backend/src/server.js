@@ -24,6 +24,7 @@ const userRoutes = require('./routes/users');
 const logRoutes = require('./routes/logs');
 const ipRoutes = require('./routes/ips');
 const scriptRoutes = require('./routes/scripts');
+const addonRoutes = require('./routes/addons');
 
 const app = express();
 const server = http.createServer(app);
@@ -76,17 +77,10 @@ app.use('/api/users', userRoutes);
 app.use('/api', logRoutes);
 app.use('/api/ips', ipRoutes);
 app.use('/api/scripts', scriptRoutes);
+app.use('/api', addonRoutes);
 
 // Uploads static
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
-
-// Serve frontend in production
-if (config.nodeEnv === 'production') {
-  app.use(express.static(path.join(__dirname, '../../frontend/dist')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../../frontend/dist/index.html'));
-  });
-}
 
 // Health check
 app.get('/api/health', (req, res) => {
@@ -97,12 +91,22 @@ app.get('/api/health', (req, res) => {
 app.get('/api/version', (req, res) => {
   try {
     const versionFile = path.join(__dirname, '../../version.json');
-    const version = require(versionFile);
-    res.json(version);
+    // Use fs.readFileSync to avoid require() caching
+    const fs = require('fs');
+    const versionData = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+    res.json(versionData);
   } catch (err) {
     res.json({ version: 'unknown' });
   }
 });
+
+// Serve frontend in production
+if (config.nodeEnv === 'production') {
+  app.use(express.static(path.join(__dirname, '../../frontend/dist')));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../../frontend/dist/index.html'));
+  });
+}
 
 // Error handler
 app.use((err, req, res, _next) => {

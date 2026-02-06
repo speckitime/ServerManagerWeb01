@@ -10,6 +10,7 @@ const tabs = [
   { path: '/logs', label: 'Logs' },
   { path: '/tasks', label: 'Tasks' },
   { path: '/documents', label: 'Docs' },
+  { path: '/addons', label: 'Addons', icon: '🔌' },
 ];
 
 export default function ServerLayout() {
