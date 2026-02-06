@@ -86,11 +86,19 @@ exports.getLogFiles = async (req, res) => {
       return res.status(404).json({ error: 'Server not found' });
     }
 
-    // Get custom logs from database
-    const customLogs = await db('server_log_paths')
-      .where({ server_id: serverId, is_active: true })
-      .orderBy('category')
-      .orderBy('name');
+    // Get custom logs from database (handle table not existing yet)
+    let customLogs = [];
+    try {
+      const tableExists = await db.schema.hasTable('server_log_paths');
+      if (tableExists) {
+        customLogs = await db('server_log_paths')
+          .where({ server_id: serverId, is_active: true })
+          .orderBy('category')
+          .orderBy('name');
+      }
+    } catch (tableErr) {
+      logger.warn('server_log_paths table not ready:', tableErr.message);
+    }
 
     res.json({
       logs: customLogs,

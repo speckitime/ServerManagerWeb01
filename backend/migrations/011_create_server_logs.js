@@ -1,7 +1,7 @@
 exports.up = function(knex) {
   return knex.schema.createTable('server_log_paths', (table) => {
     table.increments('id').primary();
-    table.integer('server_id').unsigned().notNullable()
+    table.uuid('server_id').notNullable()
       .references('id').inTable('servers').onDelete('CASCADE');
     table.string('name', 100).notNullable();
     table.string('path', 500).notNullable();

@@ -60,6 +60,14 @@ npm install --production 2>&1 | tail -3
 
 echo ""
 echo -e "${BLUE}[3/5] Running database migrations...${NC}"
+# Clean up any failed migrations first
+if command -v psql &> /dev/null && [ -f "$APP_DIR/backend/.env" ]; then
+    DB_URL=$(grep DATABASE_URL "$APP_DIR/backend/.env" | cut -d '=' -f2-)
+    if [ -n "$DB_URL" ]; then
+        psql "$DB_URL" -c "DROP TABLE IF EXISTS server_log_paths CASCADE;" 2>/dev/null || true
+        psql "$DB_URL" -c "DELETE FROM knex_migrations WHERE name = '011_create_server_logs.js';" 2>/dev/null || true
+    fi
+fi
 npx knex migrate:latest --knexfile src/config/knexfile.js 2>&1 || echo -e "${YELLOW}  Migrations may have already been applied${NC}"
 
 echo ""
