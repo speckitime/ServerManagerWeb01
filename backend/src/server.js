@@ -24,6 +24,7 @@ const userRoutes = require('./routes/users');
 const logRoutes = require('./routes/logs');
 const ipRoutes = require('./routes/ips');
 const scriptRoutes = require('./routes/scripts');
+const addonRoutes = require('./routes/addons');
 
 const app = express();
 const server = http.createServer(app);
@@ -76,6 +77,7 @@ app.use('/api/users', userRoutes);
 app.use('/api', logRoutes);
 app.use('/api/ips', ipRoutes);
 app.use('/api/scripts', scriptRoutes);
+app.use('/api', addonRoutes);
 
 // Uploads static
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

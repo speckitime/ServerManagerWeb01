@@ -13,11 +13,13 @@ import ServerPackages from './pages/ServerPackages';
 import ServerLogs from './pages/ServerLogs';
 import ServerTasks from './pages/ServerTasks';
 import ServerDocuments from './pages/ServerDocuments';
+import ServerAddons from './pages/ServerAddons';
 import Users from './pages/Users';
 import IpOverview from './pages/IpOverview';
 import ActivityLog from './pages/ActivityLog';
 import Profile from './pages/Profile';
 import Scripts from './pages/Scripts';
+import Addons from './pages/Addons';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -63,11 +65,16 @@ export default function App() {
           <Route path="logs" element={<ServerLogs />} />
           <Route path="tasks" element={<ServerTasks />} />
           <Route path="documents" element={<ServerDocuments />} />
+          <Route path="addons" element={<ServerAddons />} />
         </Route>
 
         <Route
           path="scripts"
           element={<AdminRoute><Scripts /></AdminRoute>}
+        />
+        <Route
+          path="addons"
+          element={<AdminRoute><Addons /></AdminRoute>}
         />
         <Route
           path="users"
