@@ -170,6 +170,14 @@
   animation: scaleIn 0.2s ease both;
 }
 
+.animate-fadeIn {
+  animation: fadeIn 0.2s ease both;
+}
+
+.animate-slideUp {
+  animation: slideUp 0.3s ease both;
+}
+
 .skeleton {
   background: linear-gradient(
     90deg,
