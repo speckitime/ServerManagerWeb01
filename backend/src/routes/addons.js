@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const addonController = require('../controllers/addonController');
-const { authenticate, requireAdmin, authorizeServerAccess } = require('../middleware/auth');
+const { authenticate, authorize, authorizeServerAccess } = require('../middleware/auth');
 
 // Admin routes - manage all addons
-router.get('/addons', authenticate, requireAdmin, addonController.getAllAddons);
+router.get('/addons', authenticate, authorize('admin'), addonController.getAllAddons);
 router.get('/addons/:addonId', authenticate, addonController.getAddon);
-router.patch('/addons/:addonId/toggle', authenticate, requireAdmin, addonController.toggleAddon);
+router.patch('/addons/:addonId/toggle', authenticate, authorize('admin'), addonController.toggleAddon);
 
 // Server-specific addon routes
 router.get(
