@@ -60,12 +60,18 @@ npm install --production 2>&1 | tail -3
 
 echo ""
 echo -e "${BLUE}[3/5] Running database migrations...${NC}"
-# Clean up any failed migrations first
+# Clean up any failed migrations and fix corrupted data
 if command -v psql &> /dev/null && [ -f "$APP_DIR/backend/.env" ]; then
     DB_URL=$(grep DATABASE_URL "$APP_DIR/backend/.env" | cut -d '=' -f2-)
     if [ -n "$DB_URL" ]; then
         psql "$DB_URL" -c "DROP TABLE IF EXISTS server_log_paths CASCADE;" 2>/dev/null || true
         psql "$DB_URL" -c "DELETE FROM knex_migrations WHERE name = '011_create_server_logs.js';" 2>/dev/null || true
+        # Fix corrupted addons default_config if it contains [object Object]
+        psql "$DB_URL" -c "UPDATE addons SET default_config = '{\"service_name\":\"cloudflared\",\"config_path\":\"/etc/cloudflared\",\"tunnel_name\":\"\"}' WHERE slug = 'cloudflare-tunnel';" 2>/dev/null || true
+        psql "$DB_URL" -c "UPDATE addons SET default_config = '{\"interface\":\"wg0\",\"config_path\":\"/etc/wireguard\"}' WHERE slug = 'wireguard';" 2>/dev/null || true
+        psql "$DB_URL" -c "UPDATE addons SET default_config = '{\"socket_path\":\"/var/run/docker.sock\"}' WHERE slug = 'docker';" 2>/dev/null || true
+        psql "$DB_URL" -c "UPDATE addons SET default_config = '{\"api_url\":\"\",\"api_token\":\"\"}' WHERE slug = 'nginx-proxy-manager';" 2>/dev/null || true
+        psql "$DB_URL" -c "UPDATE addons SET default_config = '{\"client_path\":\"/usr/bin/fail2ban-client\"}' WHERE slug = 'fail2ban';" 2>/dev/null || true
     fi
 fi
 npx knex migrate:latest --knexfile src/config/knexfile.js 2>&1 || echo -e "${YELLOW}  Migrations may have already been applied${NC}"
