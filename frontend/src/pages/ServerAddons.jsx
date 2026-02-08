@@ -3,7 +3,19 @@ import { useParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import api from '../services/api';
 
-// Category icons
+// Import addon panels
+import CloudflareTunnelPanel from '../components/addons/CloudflareTunnelPanel';
+import WireGuardPanel from '../components/addons/WireGuardPanel';
+import DockerPanel from '../components/addons/DockerPanel';
+import Fail2BanPanel from '../components/addons/Fail2BanPanel';
+
+const ADDON_PANELS = {
+  'cloudflare-tunnel': CloudflareTunnelPanel,
+  'wireguard': WireGuardPanel,
+  'docker': DockerPanel,
+  'fail2ban': Fail2BanPanel,
+};
+
 const CATEGORY_ICONS = {
   networking: '🌐',
   security: '🛡️',
@@ -16,12 +28,7 @@ export default function ServerAddons() {
   const { id } = useParams();
   const [addons, setAddons] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedAddon, setSelectedAddon] = useState(null);
-  const [actionOutput, setActionOutput] = useState('');
-  const [executing, setExecuting] = useState(false);
-  const [showConfigModal, setShowConfigModal] = useState(false);
-  const [configAddon, setConfigAddon] = useState(null);
-  const [configValues, setConfigValues] = useState({});
+  const [showAddModal, setShowAddModal] = useState(false);
 
   useEffect(() => {
     loadAddons();
@@ -32,7 +39,8 @@ export default function ServerAddons() {
       const { data } = await api.get(`/servers/${id}/addons`);
       setAddons(data);
     } catch (err) {
-      toast.error('Failed to load addons');
+      const msg = err.response?.data?.error || err.message;
+      toast.error('Failed to load addons: ' + msg);
     } finally {
       setLoading(false);
     }
@@ -61,63 +69,9 @@ export default function ServerAddons() {
     }
   };
 
-  const checkStatus = async (addon) => {
-    try {
-      const { data } = await api.get(`/servers/${id}/addons/${addon.id}/status`);
-      // Update local state
-      setAddons(prev => prev.map(a =>
-        a.id === addon.id
-          ? { ...a, status: data.status, status_message: data.status_message }
-          : a
-      ));
-      toast.success(`Status: ${data.status_message}`);
-    } catch (err) {
-      toast.error('Failed to check status: ' + (err.response?.data?.error || err.message));
-    }
-  };
-
-  const executeAction = async (addon, action, params = {}) => {
-    setExecuting(true);
-    setSelectedAddon(addon);
-    try {
-      const { data } = await api.post(`/servers/${id}/addons/${addon.id}/action`, {
-        action,
-        params
-      });
-      setActionOutput(data.output || '(no output)');
-    } catch (err) {
-      setActionOutput(`Error: ${err.response?.data?.error || err.message}`);
-    } finally {
-      setExecuting(false);
-    }
-  };
-
-  const openConfigModal = (addon) => {
-    setConfigAddon(addon);
-    setConfigValues(addon.server_config || addon.default_config || {});
-    setShowConfigModal(true);
-  };
-
-  const saveConfig = async () => {
-    try {
-      await api.patch(`/servers/${id}/addons/${configAddon.id}/config`, {
-        config: configValues
-      });
-      toast.success('Configuration saved');
-      setShowConfigModal(false);
-      loadAddons();
-    } catch (err) {
-      toast.error('Failed to save configuration');
-    }
-  };
-
-  // Group addons by category
-  const addonsByCategory = addons.reduce((acc, addon) => {
-    const cat = addon.category || 'integration';
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(addon);
-    return acc;
-  }, {});
+  // Separate enabled and available addons
+  const enabledAddons = addons.filter(a => a.is_installed && a.server_enabled);
+  const availableAddons = addons.filter(a => !a.is_installed || !a.server_enabled);
 
   if (loading) {
     return (
@@ -130,351 +84,170 @@ export default function ServerAddons() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
-        <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-primary-400">
-          Server Addons
-        </h2>
-        <p className="text-sm text-gray-500 mt-1">
-          Enable and manage integrations for this server
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-primary-600 to-primary-400">
+            Server Addons
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">
+            {enabledAddons.length === 0
+              ? 'No addons enabled yet'
+              : `${enabledAddons.length} addon${enabledAddons.length !== 1 ? 's' : ''} active`}
+          </p>
+        </div>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="btn-primary text-sm flex items-center gap-2"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+          </svg>
+          Add Addon
+        </button>
       </div>
 
-      {/* Addon Grid */}
-      <div className="space-y-8">
-        {Object.entries(addonsByCategory).map(([category, categoryAddons]) => (
-          <div key={category}>
-            <h3 className="flex items-center gap-2 text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-4">
-              <span className="text-lg">{CATEGORY_ICONS[category] || '🔌'}</span>
-              {category.charAt(0).toUpperCase() + category.slice(1)}
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {categoryAddons.map((addon) => (
-                <div
-                  key={addon.id}
-                  className={`card p-5 transition-all duration-300 hover:shadow-lg ${
-                    addon.is_installed && addon.server_enabled
-                      ? 'border-l-4 border-l-green-500'
-                      : ''
-                  }`}
-                >
-                  <div className="flex items-start justify-between mb-3">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">{addon.icon}</span>
-                      <div>
-                        <h4 className="font-semibold text-gray-900 dark:text-white">
-                          {addon.name}
-                        </h4>
-                        <p className="text-xs text-gray-500">v{addon.version}</p>
-                      </div>
+      {/* Enabled Addons - Show Panels */}
+      {enabledAddons.length > 0 ? (
+        <div className="space-y-6">
+          {enabledAddons.map((addon) => {
+            const PanelComponent = ADDON_PANELS[addon.slug];
+            return (
+              <div key={addon.id} className="card overflow-hidden">
+                {/* Addon Header */}
+                <div className="bg-gradient-to-r from-gray-50 to-white dark:from-gray-800 dark:to-gray-750 px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-2xl">{addon.icon}</span>
+                    <div>
+                      <h3 className="font-semibold text-gray-900 dark:text-white">
+                        {addon.name}
+                      </h3>
+                      <p className="text-xs text-gray-500">v{addon.version}</p>
                     </div>
-                    {addon.is_installed && addon.server_enabled && (
-                      <span className={`px-2 py-1 text-xs rounded-full ${
+                    {addon.status && (
+                      <span className={`ml-3 px-2.5 py-1 text-xs font-medium rounded-full ${
                         addon.status === 'active'
                           ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
                           : addon.status === 'error'
                           ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                           : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
                       }`}>
-                        {addon.status || 'unknown'}
+                        {addon.status}
                       </span>
                     )}
                   </div>
+                  <button
+                    onClick={() => disableAddon(addon)}
+                    className="text-sm text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    Disable
+                  </button>
+                </div>
 
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4 line-clamp-2">
-                    {addon.description}
-                  </p>
-
-                  {addon.status_message && addon.is_installed && (
-                    <p className="text-xs text-gray-500 mb-3 italic">
-                      {addon.status_message}
-                    </p>
-                  )}
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    {addon.is_installed && addon.server_enabled ? (
-                      <>
-                        <button
-                          onClick={() => checkStatus(addon)}
-                          className="btn-secondary text-xs py-1 px-2"
-                        >
-                          Check Status
-                        </button>
-                        <button
-                          onClick={() => openConfigModal(addon)}
-                          className="btn-secondary text-xs py-1 px-2"
-                        >
-                          Configure
-                        </button>
-                        <button
-                          onClick={() => setSelectedAddon(selectedAddon?.id === addon.id ? null : addon)}
-                          className="btn-primary text-xs py-1 px-2"
-                        >
-                          {selectedAddon?.id === addon.id ? 'Hide Actions' : 'Actions'}
-                        </button>
-                        <button
-                          onClick={() => disableAddon(addon)}
-                          className="text-xs text-red-500 hover:text-red-700 px-2"
-                        >
-                          Disable
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => enableAddon(addon)}
-                        className="btn-primary text-xs py-1 px-3"
-                      >
-                        Enable
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Action Panel */}
-                  {selectedAddon?.id === addon.id && (
-                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                      <AddonActions
-                        addon={addon}
-                        onAction={(action, params) => executeAction(addon, action, params)}
-                        executing={executing}
-                      />
-                      {actionOutput && (
-                        <div className="mt-3 p-3 bg-gray-900 rounded-lg overflow-auto max-h-48">
-                          <pre className="text-xs text-green-400 whitespace-pre-wrap font-mono">
-                            {actionOutput}
-                          </pre>
-                        </div>
-                      )}
+                {/* Addon Panel Content */}
+                <div className="p-5">
+                  {PanelComponent ? (
+                    <PanelComponent
+                      serverId={id}
+                      addon={addon}
+                      onRefresh={loadAddons}
+                    />
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      <p>No dedicated panel available for this addon</p>
+                      <p className="text-sm mt-1">Use the actions below to interact with {addon.name}</p>
                     </div>
                   )}
                 </div>
-              ))}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* Empty State */
+        <div className="card p-12">
+          <div className="text-center max-w-md mx-auto">
+            <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-primary-100 to-primary-200 dark:from-primary-900/30 dark:to-primary-800/30 flex items-center justify-center">
+              <span className="text-3xl">🔌</span>
             </div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+              No Addons Enabled
+            </h3>
+            <p className="text-gray-500 dark:text-gray-400 mb-6">
+              Enable addons to extend server management with integrations like Cloudflare Tunnel, WireGuard, Docker, and more.
+            </p>
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="btn-primary"
+            >
+              Browse Available Addons
+            </button>
           </div>
-        ))}
-      </div>
-
-      {addons.length === 0 && (
-        <div className="text-center py-12">
-          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-            <span className="text-2xl">🔌</span>
-          </div>
-          <p className="text-gray-500">No addons available</p>
         </div>
       )}
 
-      {/* Config Modal */}
-      {showConfigModal && configAddon && (
+      {/* Add Addon Modal */}
+      {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 animate-fadeIn">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full mx-4 animate-slideUp">
-            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                <span>{configAddon.icon}</span>
-                Configure {configAddon.name}
-              </h3>
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-2xl w-full mx-4 max-h-[80vh] flex flex-col animate-slideUp">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  Available Addons
+                </h3>
+                <p className="text-sm text-gray-500 mt-1">
+                  Click on an addon to enable it on this server
+                </p>
+              </div>
+              <button
+                onClick={() => setShowAddModal(false)}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+              >
+                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
             </div>
-            <div className="p-6 space-y-4">
-              {Object.entries(configValues).map(([key, value]) => (
-                <div key={key}>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 capitalize">
-                    {key.replace(/_/g, ' ')}
-                  </label>
-                  <input
-                    type="text"
-                    value={value || ''}
-                    onChange={(e) => setConfigValues({ ...configValues, [key]: e.target.value })}
-                    className="input-field w-full"
-                  />
+            <div className="p-6 overflow-y-auto flex-1">
+              {availableAddons.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  All available addons are already enabled
                 </div>
-              ))}
-            </div>
-            <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
-              <button onClick={() => setShowConfigModal(false)} className="btn-secondary">
-                Cancel
-              </button>
-              <button onClick={saveConfig} className="btn-primary">
-                Save
-              </button>
+              ) : (
+                <div className="grid gap-4">
+                  {availableAddons.map((addon) => (
+                    <button
+                      key={addon.id}
+                      onClick={() => {
+                        enableAddon(addon);
+                        setShowAddModal(false);
+                      }}
+                      className="flex items-start gap-4 p-4 rounded-xl border border-gray-200 dark:border-gray-700 hover:border-primary-300 dark:hover:border-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all text-left group"
+                    >
+                      <span className="text-3xl">{addon.icon}</span>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-semibold text-gray-900 dark:text-white group-hover:text-primary-600 dark:group-hover:text-primary-400">
+                            {addon.name}
+                          </h4>
+                          <span className="text-xs px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-500 rounded">
+                            v{addon.version}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                          {addon.description}
+                        </p>
+                      </div>
+                      <svg className="h-5 w-5 text-gray-300 group-hover:text-primary-500 transition-colors" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                      </svg>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
     </div>
   );
-}
-
-// Addon-specific actions component
-function AddonActions({ addon, onAction, executing }) {
-  const [containerName, setContainerName] = useState('');
-  const [jailName, setJailName] = useState('');
-
-  switch (addon.slug) {
-    case 'cloudflare-tunnel':
-      return (
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => onAction('status')}
-            disabled={executing}
-            className="btn-secondary text-xs py-1 px-2"
-          >
-            Service Status
-          </button>
-          <button
-            onClick={() => onAction('list-tunnels')}
-            disabled={executing}
-            className="btn-secondary text-xs py-1 px-2"
-          >
-            List Tunnels
-          </button>
-          <button
-            onClick={() => onAction('restart')}
-            disabled={executing}
-            className="btn-secondary text-xs py-1 px-2"
-          >
-            Restart Service
-          </button>
-        </div>
-      );
-
-    case 'wireguard':
-      return (
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => onAction('show')}
-            disabled={executing}
-            className="btn-secondary text-xs py-1 px-2"
-          >
-            Show Status
-          </button>
-          <button
-            onClick={() => onAction('list-peers')}
-            disabled={executing}
-            className="btn-secondary text-xs py-1 px-2"
-          >
-            List Peers
-          </button>
-          <button
-            onClick={() => onAction('transfer-stats')}
-            disabled={executing}
-            className="btn-secondary text-xs py-1 px-2"
-          >
-            Transfer Stats
-          </button>
-          <button
-            onClick={() => onAction('show-config')}
-            disabled={executing}
-            className="btn-secondary text-xs py-1 px-2"
-          >
-            Show Config
-          </button>
-        </div>
-      );
-
-    case 'docker':
-      return (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => onAction('ps')}
-              disabled={executing}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Running Containers
-            </button>
-            <button
-              onClick={() => onAction('ps-all')}
-              disabled={executing}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              All Containers
-            </button>
-            <button
-              onClick={() => onAction('images')}
-              disabled={executing}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Images
-            </button>
-            <button
-              onClick={() => onAction('stats')}
-              disabled={executing}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Stats
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Container name"
-              value={containerName}
-              onChange={(e) => setContainerName(e.target.value)}
-              className="input-field text-xs py-1 flex-1"
-            />
-            <button
-              onClick={() => onAction('start', { container: containerName })}
-              disabled={executing || !containerName}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Start
-            </button>
-            <button
-              onClick={() => onAction('stop', { container: containerName })}
-              disabled={executing || !containerName}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Stop
-            </button>
-            <button
-              onClick={() => onAction('logs', { container: containerName, lines: 50 })}
-              disabled={executing || !containerName}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Logs
-            </button>
-          </div>
-        </div>
-      );
-
-    case 'fail2ban':
-      return (
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => onAction('status')}
-              disabled={executing}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Status
-            </button>
-            <button
-              onClick={() => onAction('banned-ips')}
-              disabled={executing}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              All Banned IPs
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              placeholder="Jail name (e.g., sshd)"
-              value={jailName}
-              onChange={(e) => setJailName(e.target.value)}
-              className="input-field text-xs py-1 flex-1"
-            />
-            <button
-              onClick={() => onAction('jail-status', { jail: jailName })}
-              disabled={executing || !jailName}
-              className="btn-secondary text-xs py-1 px-2"
-            >
-              Jail Status
-            </button>
-          </div>
-        </div>
-      );
-
-    default:
-      return (
-        <p className="text-sm text-gray-500">No actions available for this addon</p>
-      );
-  }
 }
