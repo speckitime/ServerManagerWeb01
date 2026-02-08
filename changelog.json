@@ -1,0 +1,60 @@
+[
+  {
+    "version": "1.4.1",
+    "date": "2026-02-08",
+    "changes": [
+      "Fixed SSH credential update issue - username now visible when editing",
+      "Added dedicated addon panels with live status display",
+      "Fixed terminal scrolling issue with proper scrollback support",
+      "Added comprehensive Settings page with multiple sections",
+      "Added update checker with changelog display",
+      "Added API status monitoring and restart capability",
+      "Added Mail server configuration",
+      "Added 2FA and Fail2Ban security settings",
+      "Added backup management interface",
+      "Added system logs viewer"
+    ]
+  },
+  {
+    "version": "1.4.0",
+    "date": "2026-02-06",
+    "changes": [
+      "Added addon/plugin system for Cloudflare Tunnel, WireGuard, Docker, Fail2Ban",
+      "Improved log viewer with templates and auto-detection",
+      "Added version display in sidebar",
+      "Fixed addon JSON parsing issues",
+      "Added SQL repair commands to update script"
+    ]
+  },
+  {
+    "version": "1.3.0",
+    "date": "2026-02-04",
+    "changes": [
+      "Added server groups with color coding",
+      "Improved server filtering and search",
+      "Added activity logging for all actions",
+      "SSH terminal improvements with session persistence",
+      "Added multiple terminal tabs support"
+    ]
+  },
+  {
+    "version": "1.2.0",
+    "date": "2026-02-01",
+    "changes": [
+      "Added SSH terminal with xterm.js",
+      "Added server monitoring with real-time metrics",
+      "Added package management interface",
+      "Improved dashboard with server statistics"
+    ]
+  },
+  {
+    "version": "1.1.0",
+    "date": "2026-01-28",
+    "changes": [
+      "Initial public release",
+      "Server management with SSH credentials",
+      "User management with roles",
+      "IP address overview"
+    ]
+  }
+]
