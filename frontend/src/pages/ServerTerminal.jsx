@@ -104,7 +104,13 @@ function TerminalTab({ serverId, session, isActive }) {
         term.writeln('Welcome to ServerManager SSH Terminal');
         term.writeln(`Session: ${session.title}`);
         term.writeln('');
-        startConnection(term);
+        // Delay connection start to allow terminal to fit properly first
+        // This ensures correct rows/cols are sent to SSH server
+        setTimeout(() => {
+          if (mounted && xtermRef.current) {
+            startConnection(xtermRef.current);
+          }
+        }, 200);
       }
     };
 
@@ -207,6 +213,18 @@ function TerminalTab({ serverId, session, isActive }) {
       termResizeDisposableRef.current = term.onResize(({ cols, rows }) => {
         socket.emit('ssh_resize', { sessionId: sid, cols, rows });
       });
+
+      // CRITICAL: Send current terminal size immediately after connection
+      // This ensures the SSH session knows the correct dimensions
+      if (fitAddonRef.current && terminalRef.current && terminalRef.current.offsetHeight > 0) {
+        try {
+          fitAddonRef.current.fit();
+        } catch (e) {
+          // ignore fit errors
+        }
+      }
+      // Send resize with current dimensions
+      socket.emit('ssh_resize', { sessionId: sid, cols: term.cols, rows: term.rows });
     }
   };
 
@@ -271,6 +289,14 @@ function TerminalTab({ serverId, session, isActive }) {
     if (xtermRef.current) {
       xtermRef.current.clear();
       clearBuffer(serverId, sid);
+      // Fit terminal first to get correct dimensions
+      if (fitAddonRef.current && terminalRef.current && terminalRef.current.offsetHeight > 0) {
+        try {
+          fitAddonRef.current.fit();
+        } catch (e) {
+          // ignore
+        }
+      }
       startConnection(xtermRef.current);
     }
   };

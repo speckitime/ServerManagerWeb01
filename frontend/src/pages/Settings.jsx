@@ -930,9 +930,33 @@ function BackupSettings() {
     }
   };
 
-  const downloadBackup = (backupId) => {
-    const token = localStorage.getItem('token');
-    window.open(`/api/admin/backups/${backupId}/download?token=${token}`, '_blank');
+  const downloadBackup = async (backupId) => {
+    try {
+      // Fetch backup as blob with token in Authorization header (more secure)
+      const response = await api.get(`/admin/backups/${backupId}/download`, {
+        responseType: 'blob',
+      });
+
+      // Create object URL and trigger download
+      const blob = new Blob([response.data]);
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+
+      // Extract filename from Content-Disposition header or use default
+      const contentDisposition = response.headers['content-disposition'];
+      const filename = contentDisposition
+        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
+        : `backup_${backupId}.sql.gz`;
+
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error('Failed to download backup');
+    }
   };
 
   const saveSettings = async () => {
