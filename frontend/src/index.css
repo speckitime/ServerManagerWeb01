@@ -284,35 +284,68 @@ tbody tr:hover {
 /*  xterm.js Styling                                                   */
 /* ------------------------------------------------------------------ */
 
-.xterm {
-  height: 100% !important;
-  padding: 4px;
+/* Terminal wrapper container */
+.terminal-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px;
+  box-sizing: border-box;
 }
 
+/* Main xterm container - must fill parent */
+.terminal-wrapper .xterm {
+  flex: 1;
+  height: 100% !important;
+  min-height: 0;
+}
+
+/* The xterm screen canvas */
 .xterm-screen {
   height: 100% !important;
 }
 
-.xterm-viewport {
-  overflow-y: scroll !important;
-  scrollbar-width: thin;
-  scrollbar-color: #4b5563 #1a1b26;
+/* The rows container inside xterm */
+.xterm-rows {
+  /* Let xterm handle the rows */
 }
 
+/* Critical: viewport scrolling */
+.xterm-viewport {
+  overflow-y: auto !important;
+  scrollbar-width: thin;
+  scrollbar-color: #6b7280 #1a1b26;
+}
+
+/* Custom scrollbar styling for webkit browsers */
 .xterm-viewport::-webkit-scrollbar {
-  width: 12px;
+  width: 10px;
 }
 
 .xterm-viewport::-webkit-scrollbar-track {
   background: #1a1b26;
+  border-radius: 5px;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb {
   background: #4b5563;
-  border-radius: 6px;
-  border: 3px solid #1a1b26;
+  border-radius: 5px;
+  border: 2px solid #1a1b26;
 }
 
 .xterm-viewport::-webkit-scrollbar-thumb:hover {
   background: #6b7280;
+}
+
+/* Ensure helper spans don't break layout */
+.xterm-helper-textarea {
+  position: absolute !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Accessibility - text should not overflow */
+.xterm-accessibility {
+  position: absolute;
+  overflow: hidden;
 }

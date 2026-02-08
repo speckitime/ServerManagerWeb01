@@ -46,6 +46,8 @@ function TerminalTab({ serverId, session, isActive }) {
         scrollback: 10000,
         convertEol: true,
         allowProposedApi: true,
+        rows: 24,
+        cols: 80,
         theme: {
           background: '#1a1b26',
           foreground: '#a9b1d6',
@@ -75,7 +77,21 @@ function TerminalTab({ serverId, session, isActive }) {
       term.loadAddon(new WebLinksAddon());
       term.open(terminalRef.current);
 
-      setTimeout(() => fitAddon.fit(), 10);
+      // Wait for container to be ready, then fit
+      const doFit = () => {
+        if (terminalRef.current && terminalRef.current.offsetHeight > 0) {
+          try {
+            fitAddon.fit();
+          } catch (e) {
+            console.warn('Fit failed:', e);
+          }
+        }
+      };
+
+      // Multiple fit attempts to handle layout settling
+      setTimeout(doFit, 0);
+      setTimeout(doFit, 50);
+      setTimeout(doFit, 150);
 
       xtermRef.current = term;
       fitAddonRef.current = fitAddon;
@@ -95,15 +111,34 @@ function TerminalTab({ serverId, session, isActive }) {
     init();
 
     const handleResize = () => {
-      if (fitAddonRef.current && xtermRef.current) {
-        fitAddonRef.current.fit();
+      if (fitAddonRef.current && xtermRef.current && terminalRef.current) {
+        // Only fit if container has valid dimensions
+        if (terminalRef.current.offsetHeight > 0 && terminalRef.current.offsetWidth > 0) {
+          try {
+            fitAddonRef.current.fit();
+          } catch (e) {
+            console.warn('Resize fit failed:', e);
+          }
+        }
       }
     };
     window.addEventListener('resize', handleResize);
 
+    // Also observe the container for size changes
+    let resizeObserver;
+    if (typeof ResizeObserver !== 'undefined' && terminalRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        handleResize();
+      });
+      resizeObserver.observe(terminalRef.current);
+    }
+
     return () => {
       mounted = false;
       window.removeEventListener('resize', handleResize);
+      if (resizeObserver) {
+        resizeObserver.disconnect();
+      }
       cleanupListeners();
       if (xtermRef.current) {
         xtermRef.current.dispose();
@@ -114,8 +149,20 @@ function TerminalTab({ serverId, session, isActive }) {
 
   // Refit when tab becomes active
   useEffect(() => {
-    if (isActive && fitAddonRef.current) {
-      setTimeout(() => fitAddonRef.current.fit(), 50);
+    if (isActive && fitAddonRef.current && terminalRef.current) {
+      const doFit = () => {
+        if (terminalRef.current && terminalRef.current.offsetHeight > 0) {
+          try {
+            fitAddonRef.current.fit();
+          } catch (e) {
+            console.warn('Tab switch fit failed:', e);
+          }
+        }
+      };
+      // Multiple attempts for layout settling
+      setTimeout(doFit, 0);
+      setTimeout(doFit, 100);
+      setTimeout(doFit, 300);
     }
   }, [isActive]);
 
@@ -237,7 +284,7 @@ function TerminalTab({ serverId, session, isActive }) {
   if (!isActive) return null;
 
   return (
-    <div className="flex flex-col animate-fade-in" style={{ height: 'calc(100vh - 240px)', minHeight: '400px' }}>
+    <div className="flex flex-col h-full" style={{ minHeight: '500px' }}>
       <div className="flex items-center justify-between mb-2 flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full transition-all duration-300 ${
@@ -270,8 +317,12 @@ function TerminalTab({ serverId, session, isActive }) {
 
       <div
         ref={terminalRef}
-        className="flex-1 bg-[#1a1b26] rounded-lg shadow-lg"
-        style={{ padding: '8px' }}
+        className="flex-1 bg-[#1a1b26] rounded-lg shadow-lg terminal-wrapper"
+        style={{
+          minHeight: '400px',
+          position: 'relative',
+          overflow: 'hidden'
+        }}
       />
     </div>
   );
@@ -297,9 +348,9 @@ export default function ServerTerminal() {
   const activeTab = getActiveTab(id);
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex flex-col" style={{ height: 'calc(100vh - 180px)', minHeight: '500px' }}>
       {/* Terminal tabs */}
-      <div className="flex items-center gap-1 mb-3">
+      <div className="flex items-center gap-1 mb-3 flex-shrink-0">
         <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-xl p-1 overflow-x-auto flex-1 shadow-inner">
           {sessions.map((session, index) => (
             <div
@@ -345,7 +396,7 @@ export default function ServerTerminal() {
       </div>
 
       {/* Active terminal */}
-      <div className="flex-1">
+      <div className="flex-1 min-h-0">
         {sessions.map((session, index) => (
           <TerminalTab
             key={session.id}
