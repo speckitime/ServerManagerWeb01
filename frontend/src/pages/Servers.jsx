@@ -313,10 +313,10 @@ function ServerFormModal({ server, groups, onClose, onSaved }) {
     ssh_port: server?.ssh_port || 22,
     rdp_port: server?.rdp_port || 3389,
     group_id: server?.group_id || '',
-    ssh_username: '',
+    ssh_username: server?.ssh_username || '',
     ssh_password: '',
     ssh_private_key: '',
-    rdp_username: '',
+    rdp_username: server?.rdp_username || '',
     rdp_password: '',
   });
   const [saving, setSaving] = useState(false);
@@ -413,25 +413,35 @@ function ServerFormModal({ server, groups, onClose, onSaved }) {
           </div>
 
           {isEdit && !showCredentials ? (
-            <button type="button" onClick={() => setShowCredentials(true)} className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
-              </svg>
-              Change credentials...
-            </button>
+            <div className="space-y-2">
+              {server?.ssh_username && (
+                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z" />
+                  </svg>
+                  Current SSH User: <span className="font-mono font-medium text-gray-900 dark:text-white">{server.ssh_username}</span>
+                </div>
+              )}
+              <button type="button" onClick={() => setShowCredentials(true)} className="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1">
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
+                </svg>
+                Change credentials...
+              </button>
+            </div>
           ) : (
             <>
               {form.os_type === 'linux' && (
                 <fieldset className="border border-gray-200 dark:border-gray-600 rounded-xl p-4 bg-gray-50 dark:bg-gray-800/50">
-                  <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 px-2">SSH Credentials {isEdit && '(leave empty to keep current)'}</legend>
+                  <legend className="text-sm font-medium text-gray-700 dark:text-gray-300 px-2">SSH Credentials {isEdit && '(password required to save changes)'}</legend>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Username</label>
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Username *</label>
                       <input type="text" className="input-field" placeholder="root" value={form.ssh_username} onChange={(e) => setForm({ ...form, ssh_username: e.target.value })} />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Password</label>
-                      <input type="password" className="input-field" value={form.ssh_password} onChange={(e) => setForm({ ...form, ssh_password: e.target.value })} />
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Password *</label>
+                      <input type="password" className="input-field" placeholder={isEdit ? '(enter to update)' : ''} value={form.ssh_password} onChange={(e) => setForm({ ...form, ssh_password: e.target.value })} />
                     </div>
                   </div>
                   <div className="mt-3">

@@ -94,6 +94,28 @@ exports.get = async (req, res) => {
       .orderBy('recorded_at', 'desc')
       .first();
 
+    // Decrypt credentials to get username (not password) for display
+    let ssh_username = null;
+    let rdp_username = null;
+
+    if (server.ssh_credentials_encrypted) {
+      try {
+        const sshCreds = decryptCredentials(server.ssh_credentials_encrypted);
+        ssh_username = sshCreds?.username || null;
+      } catch (e) {
+        logger.error('Failed to decrypt SSH credentials for display:', e);
+      }
+    }
+
+    if (server.rdp_credentials_encrypted) {
+      try {
+        const rdpCreds = decryptCredentials(server.rdp_credentials_encrypted);
+        rdp_username = rdpCreds?.username || null;
+      } catch (e) {
+        logger.error('Failed to decrypt RDP credentials for display:', e);
+      }
+    }
+
     res.json({
       ...server,
       ssh_credentials_encrypted: undefined,
@@ -102,6 +124,8 @@ exports.get = async (req, res) => {
       has_ssh_credentials: !!server.ssh_credentials_encrypted,
       has_rdp_credentials: !!server.rdp_credentials_encrypted,
       has_ssh_key: !!server.ssh_private_key_encrypted,
+      ssh_username,
+      rdp_username,
       additional_ips: ips,
       latest_metrics: latestMetrics || null,
     });
