@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.4.2",
+    "date": "2026-02-08",
+    "changes": [
+      "Added real database storage for all settings",
+      "Added backup creation with progress bar and percentage display",
+      "Added WebSocket real-time backup progress updates",
+      "Added backup download and delete functionality",
+      "Fixed settings persistence (security, mail, backup settings)",
+      "Added database migration for settings, backups, and IP bans tables",
+      "Improved system logs viewer with file-based log reading"
+    ]
+  },
+  {
     "version": "1.4.1",
     "date": "2026-02-08",
     "changes": [

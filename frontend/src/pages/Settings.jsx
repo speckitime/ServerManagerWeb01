@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import api from '../services/api';
+import { getSocket } from '../services/socket';
 
 const TABS = [
   { id: 'general', name: 'General', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
@@ -837,6 +838,8 @@ function BackupSettings() {
   const [backups, setBackups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
+  const [currentBackupId, setCurrentBackupId] = useState(null);
+  const [progress, setProgress] = useState(0);
   const [settings, setSettings] = useState({
     auto_backup: false,
     backup_schedule: 'daily',
@@ -844,46 +847,92 @@ function BackupSettings() {
     backup_path: '/var/backups/servermanager',
   });
 
-  useEffect(() => {
-    loadBackups();
-    loadSettings();
-  }, []);
-
-  const loadBackups = async () => {
+  const loadBackups = useCallback(async () => {
     try {
       const { data } = await api.get('/admin/backups');
       setBackups(data || []);
     } catch (err) {
-      // Demo data
-      setBackups([
-        { id: 1, name: 'backup_2026-02-08_12-00.sql.gz', size: '15.2 MB', created_at: '2026-02-08T12:00:00Z' },
-        { id: 2, name: 'backup_2026-02-07_12-00.sql.gz', size: '14.8 MB', created_at: '2026-02-07T12:00:00Z' },
-      ]);
+      console.error('Failed to load backups:', err);
+      setBackups([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const loadSettings = async () => {
+  const loadSettings = useCallback(async () => {
     try {
       const { data } = await api.get('/settings/backup');
       if (data) setSettings(prev => ({ ...prev, ...data }));
     } catch (err) {
       // Use defaults
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    loadBackups();
+    loadSettings();
+
+    // Set up WebSocket listener for backup progress
+    const socket = getSocket();
+
+    const handleBackupProgress = (data) => {
+      if (data.id === currentBackupId || currentBackupId === null) {
+        setProgress(data.progress || 0);
+
+        if (data.status === 'completed') {
+          setCreating(false);
+          setCurrentBackupId(null);
+          setProgress(0);
+          toast.success('Backup created successfully');
+          loadBackups();
+        } else if (data.status === 'failed') {
+          setCreating(false);
+          setCurrentBackupId(null);
+          setProgress(0);
+          toast.error('Backup failed: ' + (data.error || 'Unknown error'));
+          loadBackups();
+        }
+      }
+    };
+
+    socket.on('backup_progress', handleBackupProgress);
+
+    return () => {
+      socket.off('backup_progress', handleBackupProgress);
+    };
+  }, [currentBackupId, loadBackups, loadSettings]);
 
   const createBackup = async () => {
     setCreating(true);
+    setProgress(0);
     try {
-      await api.post('/admin/backups');
-      toast.success('Backup created successfully');
-      loadBackups();
+      const { data } = await api.post('/admin/backups');
+      if (data.backup_id) {
+        setCurrentBackupId(data.backup_id);
+      }
+      // Don't show success here - wait for WebSocket progress to complete
     } catch (err) {
       toast.error('Failed to create backup');
-    } finally {
       setCreating(false);
+      setProgress(0);
     }
+  };
+
+  const deleteBackup = async (backupId) => {
+    if (!confirm('Are you sure you want to delete this backup?')) return;
+
+    try {
+      await api.delete(`/admin/backups/${backupId}`);
+      toast.success('Backup deleted');
+      loadBackups();
+    } catch (err) {
+      toast.error('Failed to delete backup');
+    }
+  };
+
+  const downloadBackup = (backupId) => {
+    const token = localStorage.getItem('token');
+    window.open(`/api/admin/backups/${backupId}/download?token=${token}`, '_blank');
   };
 
   const saveSettings = async () => {
@@ -893,6 +942,16 @@ function BackupSettings() {
     } catch (err) {
       toast.error('Failed to save settings');
     }
+  };
+
+  const getStatusBadge = (status) => {
+    const styles = {
+      completed: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+      in_progress: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
+      failed: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+      pending: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300',
+    };
+    return styles[status] || styles.pending;
   };
 
   return (
@@ -919,35 +978,89 @@ function BackupSettings() {
           </button>
         </div>
 
+        {/* Progress bar during backup creation */}
+        {creating && (
+          <div className="mb-4 p-4 bg-primary-50 dark:bg-primary-900/20 rounded-xl border border-primary-200 dark:border-primary-800">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm font-medium text-primary-700 dark:text-primary-300">
+                Creating backup...
+              </span>
+              <span className="text-sm font-bold text-primary-700 dark:text-primary-300">
+                {progress}%
+              </span>
+            </div>
+            <div className="w-full bg-primary-200 dark:bg-primary-800 rounded-full h-3 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-primary-500 to-primary-600 rounded-full transition-all duration-300 ease-out"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <div className="animate-spin h-6 w-6 border-2 border-primary-500 border-t-transparent rounded-full" />
           </div>
         ) : backups.length === 0 ? (
           <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
-            <p className="text-gray-500">No backups available</p>
+            <svg className="mx-auto h-12 w-12 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" strokeWidth={1} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+            </svg>
+            <p className="text-gray-500 dark:text-gray-400">No backups available</p>
+            <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Create your first backup to protect your data</p>
           </div>
         ) : (
           <div className="space-y-2">
             {backups.map((backup) => (
-              <div key={backup.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900/50 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
-                  </svg>
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white text-sm">{backup.name}</p>
-                    <p className="text-xs text-gray-500">{backup.size} • {new Date(backup.created_at).toLocaleString()}</p>
+              <div key={backup.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors">
+                <div className="flex items-center gap-3 flex-1 min-w-0">
+                  <div className={`flex-shrink-0 h-10 w-10 rounded-lg flex items-center justify-center ${
+                    backup.status === 'completed' ? 'bg-green-100 dark:bg-green-900/30' :
+                    backup.status === 'in_progress' ? 'bg-yellow-100 dark:bg-yellow-900/30' :
+                    backup.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30' : 'bg-gray-100 dark:bg-gray-800'
+                  }`}>
+                    {backup.status === 'in_progress' ? (
+                      <div className="animate-spin h-5 w-5 border-2 border-yellow-500 border-t-transparent rounded-full" />
+                    ) : (
+                      <svg className={`h-5 w-5 ${
+                        backup.status === 'completed' ? 'text-green-600' :
+                        backup.status === 'failed' ? 'text-red-600' : 'text-gray-400'
+                      }`} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5m8.25 3v6.75m0 0l-3-3m3 3l3-3M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z" />
+                      </svg>
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900 dark:text-white text-sm truncate">{backup.name}</p>
+                      <span className={`px-2 py-0.5 text-xs font-medium rounded ${getStatusBadge(backup.status)}`}>
+                        {backup.status === 'in_progress' ? `${backup.progress || 0}%` : backup.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                      {backup.size} • {new Date(backup.created_at).toLocaleString()}
+                    </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <button className="p-2 text-gray-400 hover:text-primary-600 transition-colors" title="Download">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-                    </svg>
-                  </button>
-                  <button className="p-2 text-gray-400 hover:text-red-600 transition-colors" title="Delete">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <div className="flex items-center gap-1 ml-4">
+                  {backup.status === 'completed' && (
+                    <button
+                      onClick={() => downloadBackup(backup.id)}
+                      className="p-2 text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-lg transition-all"
+                      title="Download"
+                    >
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                      </svg>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => deleteBackup(backup.id)}
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                    title="Delete"
+                  >
+                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
                     </svg>
                   </button>
