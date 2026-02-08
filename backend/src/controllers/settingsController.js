@@ -1,10 +1,9 @@
 const db = require('../config/database');
 const logger = require('../services/logger');
 const path = require('path');
-const fs = require('fs');
-const { exec } = require('child_process');
-const { promisify } = require('util');
-const execAsync = promisify(exec);
+const fs = require('fs').promises;
+const fsSync = require('fs');
+const { spawn } = require('child_process');
 
 // Get all settings (grouped by category)
 exports.getSettings = async (req, res) => {
@@ -198,7 +197,7 @@ exports.getBackups = async (req, res) => {
   }
 };
 
-// Create backup
+// Create backup - uses spawn to avoid command injection
 exports.createBackup = async (req, res) => {
   try {
     const io = req.app.get('io');
@@ -207,8 +206,10 @@ exports.createBackup = async (req, res) => {
     const backupDir = path.join(__dirname, '../../backups');
 
     // Ensure backup directory exists
-    if (!fs.existsSync(backupDir)) {
-      fs.mkdirSync(backupDir, { recursive: true });
+    try {
+      await fs.access(backupDir);
+    } catch {
+      await fs.mkdir(backupDir, { recursive: true });
     }
 
     const filepath = path.join(backupDir, filename);
@@ -229,7 +230,7 @@ exports.createBackup = async (req, res) => {
       io.emit('backup_progress', { id: backup.id, progress: 0, status: 'in_progress' });
     }
 
-    // Start backup asynchronously
+    // Start backup asynchronously using spawn (safer than exec - no shell injection)
     const databaseUrl = process.env.DATABASE_URL;
 
     // Simulate progress updates (real pg_dump doesn't provide progress)
@@ -244,14 +245,36 @@ exports.createBackup = async (req, res) => {
       }
     }, 500);
 
-    // Run pg_dump
-    try {
-      await execAsync(`pg_dump "${databaseUrl}" | gzip > "${filepath}"`);
+    // Run pg_dump with spawn (safer - no shell involved)
+    const runBackup = () => {
+      return new Promise((resolve, reject) => {
+        const pgDump = spawn('pg_dump', [databaseUrl], { stdio: ['ignore', 'pipe', 'pipe'] });
+        const gzip = spawn('gzip', [], { stdio: ['pipe', 'pipe', 'pipe'] });
+        const writeStream = fsSync.createWriteStream(filepath);
 
+        pgDump.stdout.pipe(gzip.stdin);
+        gzip.stdout.pipe(writeStream);
+
+        let errorOutput = '';
+        pgDump.stderr.on('data', (data) => { errorOutput += data.toString(); });
+        gzip.stderr.on('data', (data) => { errorOutput += data.toString(); });
+
+        writeStream.on('finish', () => resolve());
+        writeStream.on('error', (err) => reject(err));
+        pgDump.on('error', (err) => reject(err));
+        gzip.on('error', (err) => reject(err));
+        pgDump.on('close', (code) => {
+          if (code !== 0) reject(new Error(`pg_dump exited with code ${code}: ${errorOutput}`));
+        });
+      });
+    };
+
+    try {
+      await runBackup();
       clearInterval(progressInterval);
 
-      // Get file size
-      const stats = fs.statSync(filepath);
+      // Get file size using async stat
+      const stats = await fs.stat(filepath);
 
       await db('backups').where({ id: backup.id }).update({
         status: 'completed',
@@ -292,9 +315,12 @@ exports.deleteBackup = async (req, res) => {
       return res.status(404).json({ error: 'Backup not found' });
     }
 
-    // Delete file if exists
-    if (fs.existsSync(backup.filepath)) {
-      fs.unlinkSync(backup.filepath);
+    // Delete file if exists (using async unlink)
+    try {
+      await fs.access(backup.filepath);
+      await fs.unlink(backup.filepath);
+    } catch {
+      // File doesn't exist, that's ok
     }
 
     await db('backups').where({ id: req.params.id }).del();
@@ -313,7 +339,10 @@ exports.downloadBackup = async (req, res) => {
       return res.status(404).json({ error: 'Backup not found' });
     }
 
-    if (!fs.existsSync(backup.filepath)) {
+    // Check file exists using async access
+    try {
+      await fs.access(backup.filepath);
+    } catch {
       return res.status(404).json({ error: 'Backup file not found' });
     }
 
@@ -324,7 +353,7 @@ exports.downloadBackup = async (req, res) => {
   }
 };
 
-// Get system logs
+// Get system logs (using async file operations)
 exports.getLogs = async (req, res) => {
   try {
     const { level, limit = 100 } = req.query;
@@ -333,8 +362,9 @@ exports.getLogs = async (req, res) => {
 
     let logs = [];
 
-    if (fs.existsSync(logFile)) {
-      const content = fs.readFileSync(logFile, 'utf8');
+    try {
+      await fs.access(logFile);
+      const content = await fs.readFile(logFile, 'utf8');
       const lines = content.split('\n').filter(l => l.trim());
 
       logs = lines.slice(-parseInt(limit)).reverse().map((line, idx) => {
@@ -366,6 +396,9 @@ exports.getLogs = async (req, res) => {
       if (level && level !== 'all') {
         logs = logs.filter(l => l.level === level);
       }
+    } catch {
+      // Log file doesn't exist yet
+      logs = [];
     }
 
     res.json(logs);
