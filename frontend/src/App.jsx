@@ -20,6 +20,7 @@ import ActivityLog from './pages/ActivityLog';
 import Profile from './pages/Profile';
 import Scripts from './pages/Scripts';
 import Addons from './pages/Addons';
+import Settings from './pages/Settings';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -86,6 +87,10 @@ export default function App() {
           element={<AdminRoute><ActivityLog /></AdminRoute>}
         />
         <Route path="profile" element={<Profile />} />
+        <Route
+          path="settings"
+          element={<AdminRoute><Settings /></AdminRoute>}
+        />
       </Route>
       <Route path="*" element={<Navigate to="/" />} />
     </Routes>

@@ -43,10 +43,14 @@ function TerminalTab({ serverId, session, isActive }) {
         cursorBlink: true,
         fontSize: 14,
         fontFamily: '"Fira Code", "Cascadia Code", Menlo, monospace',
+        scrollback: 10000,
+        convertEol: true,
+        allowProposedApi: true,
         theme: {
           background: '#1a1b26',
           foreground: '#a9b1d6',
           cursor: '#c0caf5',
+          selection: 'rgba(122, 162, 247, 0.3)',
           black: '#32344a',
           red: '#f7768e',
           green: '#9ece6a',
@@ -266,8 +270,8 @@ function TerminalTab({ serverId, session, isActive }) {
 
       <div
         ref={terminalRef}
-        className="flex-1 min-h-[400px] bg-[#1a1b26] rounded-lg overflow-hidden shadow-lg"
-        style={{ padding: '8px' }}
+        className="flex-1 min-h-[400px] h-full bg-[#1a1b26] rounded-lg shadow-lg terminal-container"
+        style={{ padding: '8px', overflow: 'hidden' }}
       />
     </div>
   );

@@ -100,6 +100,88 @@ app.get('/api/version', (req, res) => {
   }
 });
 
+// Changelog
+app.get('/api/changelog', (req, res) => {
+  try {
+    const changelogFile = path.join(__dirname, '../../changelog.json');
+    const fs = require('fs');
+    const changelog = JSON.parse(fs.readFileSync(changelogFile, 'utf8'));
+    res.json(changelog);
+  } catch (err) {
+    res.json([]);
+  }
+});
+
+// Settings endpoints (placeholder - can be extended with database storage)
+app.get('/api/settings', (req, res) => {
+  res.json({});
+});
+
+app.put('/api/settings', (req, res) => {
+  res.json({ success: true });
+});
+
+app.get('/api/settings/security', (req, res) => {
+  res.json({});
+});
+
+app.put('/api/settings/security', (req, res) => {
+  res.json({ success: true });
+});
+
+app.get('/api/settings/mail', (req, res) => {
+  res.json({});
+});
+
+app.put('/api/settings/mail', (req, res) => {
+  res.json({ success: true });
+});
+
+app.post('/api/settings/mail/test', (req, res) => {
+  res.json({ success: true, message: 'Test email sent' });
+});
+
+app.get('/api/settings/backup', (req, res) => {
+  res.json({});
+});
+
+app.put('/api/settings/backup', (req, res) => {
+  res.json({ success: true });
+});
+
+// Admin endpoints
+app.get('/api/admin/logs', (req, res) => {
+  res.json([]);
+});
+
+app.get('/api/admin/backups', (req, res) => {
+  res.json([]);
+});
+
+app.post('/api/admin/backups', (req, res) => {
+  res.json({ success: true });
+});
+
+app.post('/api/admin/restart', (req, res) => {
+  res.json({ success: true, message: 'Restart initiated' });
+});
+
+// Update check
+app.get('/api/updates/check', (req, res) => {
+  try {
+    const versionFile = path.join(__dirname, '../../version.json');
+    const fs = require('fs');
+    const versionData = JSON.parse(fs.readFileSync(versionFile, 'utf8'));
+    res.json({
+      updateAvailable: false,
+      currentVersion: versionData.version,
+      latestVersion: versionData.version,
+    });
+  } catch (err) {
+    res.json({ updateAvailable: false, currentVersion: 'unknown' });
+  }
+});
+
 // Serve frontend in production
 if (config.nodeEnv === 'production') {
   app.use(express.static(path.join(__dirname, '../../frontend/dist')));
