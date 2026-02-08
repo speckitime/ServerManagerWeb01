@@ -311,7 +311,7 @@ exports.checkAddonStatus = async (req, res) => {
 exports.executeAddonAction = async (req, res) => {
   try {
     const { serverId, addonId } = req.params;
-    const { action, params } = req.body;
+    const { action, container, jail, ip } = req.body;
 
     const server = await db('servers').where({ id: serverId }).first();
     if (!server) {
@@ -339,132 +339,353 @@ exports.executeAddonAction = async (req, res) => {
     const serverAddon = await db('server_addons')
       .where({ server_id: serverId, addon_id: addonId })
       .first();
-    const config = serverAddon?.config ? JSON.parse(serverAddon.config) : {};
+    const config = serverAddon?.config ? parseJsonField(serverAddon.config) : {};
 
-    let cmd = '';
-    let result = {};
-
-    // Define addon-specific actions
+    // Handle addon-specific actions with structured responses
     switch (addon.slug) {
       case 'cloudflare-tunnel':
-        switch (action) {
-          case 'list-tunnels':
-            cmd = 'cloudflared tunnel list 2>/dev/null';
-            break;
-          case 'tunnel-info':
-            cmd = `cloudflared tunnel info ${params?.tunnel_name || ''} 2>/dev/null`;
-            break;
-          case 'restart':
-            cmd = 'sudo systemctl restart cloudflared';
-            break;
-          case 'status':
-            cmd = 'sudo systemctl status cloudflared --no-pager';
-            break;
-          default:
-            return res.status(400).json({ error: 'Unknown action' });
-        }
-        break;
-
+        return handleCloudflareTunnelAction(server, credentials, config, action, res);
       case 'wireguard':
-        const wgInterface = config.interface || 'wg0';
-        switch (action) {
-          case 'show':
-            cmd = `sudo wg show ${wgInterface}`;
-            break;
-          case 'show-config':
-            cmd = `sudo cat /etc/wireguard/${wgInterface}.conf 2>/dev/null || echo "Config not found"`;
-            break;
-          case 'up':
-            cmd = `sudo wg-quick up ${wgInterface}`;
-            break;
-          case 'down':
-            cmd = `sudo wg-quick down ${wgInterface}`;
-            break;
-          case 'list-peers':
-            cmd = `sudo wg show ${wgInterface} peers`;
-            break;
-          case 'transfer-stats':
-            cmd = `sudo wg show ${wgInterface} transfer`;
-            break;
-          default:
-            return res.status(400).json({ error: 'Unknown action' });
-        }
-        break;
-
+        return handleWireGuardAction(server, credentials, config, action, res);
       case 'docker':
-        switch (action) {
-          case 'ps':
-            cmd = 'docker ps --format "table {{.ID}}\\t{{.Names}}\\t{{.Status}}\\t{{.Ports}}"';
-            break;
-          case 'ps-all':
-            cmd = 'docker ps -a --format "table {{.ID}}\\t{{.Names}}\\t{{.Status}}\\t{{.Ports}}"';
-            break;
-          case 'images':
-            cmd = 'docker images --format "table {{.Repository}}\\t{{.Tag}}\\t{{.Size}}"';
-            break;
-          case 'stats':
-            cmd = 'docker stats --no-stream --format "table {{.Name}}\\t{{.CPUPerc}}\\t{{.MemUsage}}"';
-            break;
-          case 'start':
-            if (!params?.container) return res.status(400).json({ error: 'Container name required' });
-            cmd = `docker start ${params.container}`;
-            break;
-          case 'stop':
-            if (!params?.container) return res.status(400).json({ error: 'Container name required' });
-            cmd = `docker stop ${params.container}`;
-            break;
-          case 'restart':
-            if (!params?.container) return res.status(400).json({ error: 'Container name required' });
-            cmd = `docker restart ${params.container}`;
-            break;
-          case 'logs':
-            if (!params?.container) return res.status(400).json({ error: 'Container name required' });
-            const lines = params.lines || 100;
-            cmd = `docker logs --tail ${lines} ${params.container} 2>&1`;
-            break;
-          default:
-            return res.status(400).json({ error: 'Unknown action' });
-        }
-        break;
-
+        return handleDockerAction(server, credentials, config, action, container, res);
       case 'fail2ban':
-        switch (action) {
-          case 'status':
-            cmd = 'sudo fail2ban-client status';
-            break;
-          case 'jail-status':
-            if (!params?.jail) return res.status(400).json({ error: 'Jail name required' });
-            cmd = `sudo fail2ban-client status ${params.jail}`;
-            break;
-          case 'banned-ips':
-            if (!params?.jail) {
-              cmd = 'sudo fail2ban-client status | grep "Jail list" | sed "s/.*://;s/,/\\n/g" | while read jail; do echo "=== $jail ==="; sudo fail2ban-client status $jail 2>/dev/null | grep "Banned IP"; done';
-            } else {
-              cmd = `sudo fail2ban-client status ${params.jail} | grep -A 100 "Banned IP"`;
-            }
-            break;
-          case 'unban':
-            if (!params?.jail || !params?.ip) return res.status(400).json({ error: 'Jail and IP required' });
-            cmd = `sudo fail2ban-client set ${params.jail} unbanip ${params.ip}`;
-            break;
-          default:
-            return res.status(400).json({ error: 'Unknown action' });
-        }
-        break;
-
+        return handleFail2BanAction(server, credentials, config, action, jail, ip, res);
       default:
         return res.status(400).json({ error: 'Addon has no actions configured' });
     }
-
-    const output = await executeSSHCommand(server, credentials, cmd);
-    result = { output: output.trim(), action, addon: addon.slug };
-
-    res.json(result);
   } catch (err) {
     logger.error('Execute addon action error:', err);
     res.status(500).json({ error: 'Failed to execute action: ' + err.message });
   }
 };
+
+// Cloudflare Tunnel action handler
+async function handleCloudflareTunnelAction(server, credentials, config, action, res) {
+  try {
+    switch (action) {
+      case 'status': {
+        // Get service status and tunnel info
+        const cmd = `
+          echo "=== SERVICE_STATUS ===" && systemctl is-active cloudflared 2>/dev/null || echo "inactive";
+          echo "=== TUNNEL_LIST ===" && cloudflared tunnel list --output json 2>/dev/null || echo "[]";
+          echo "=== CONFIG ===" && cat /etc/cloudflared/config.yml 2>/dev/null || echo "not-found"
+        `;
+        const output = await executeSSHCommand(server, credentials, cmd);
+
+        const serviceRunning = output.includes('active') && !output.includes('inactive');
+        let tunnels = [];
+        let ingress = [];
+
+        // Parse tunnel list
+        const tunnelListMatch = output.match(/=== TUNNEL_LIST ===\s*([\s\S]*?)(=== CONFIG ===|$)/);
+        if (tunnelListMatch && tunnelListMatch[1]) {
+          try {
+            const jsonStr = tunnelListMatch[1].trim();
+            if (jsonStr.startsWith('[')) {
+              tunnels = JSON.parse(jsonStr);
+            }
+          } catch (e) {
+            // Not valid JSON, might be table format
+          }
+        }
+
+        // Parse config for ingress rules
+        const configMatch = output.match(/=== CONFIG ===\s*([\s\S]*?)$/);
+        if (configMatch && configMatch[1]) {
+          const configText = configMatch[1];
+          const ingressMatches = configText.matchAll(/- hostname:\s*(\S+)\s*\n\s*service:\s*(\S+)/g);
+          for (const m of ingressMatches) {
+            ingress.push({ hostname: m[1], service: m[2] });
+          }
+        }
+
+        return res.json({
+          running: serviceRunning,
+          status: serviceRunning ? 'running' : 'stopped',
+          tunnel: tunnels.length > 0 ? tunnels[0] : null,
+          tunnels,
+          ingress,
+          connections: tunnels.length > 0 ? (tunnels[0].connections?.length || 1) : 0
+        });
+      }
+
+      case 'start':
+        await executeSSHCommand(server, credentials, 'sudo systemctl start cloudflared');
+        return res.json({ success: true });
+
+      case 'stop':
+        await executeSSHCommand(server, credentials, 'sudo systemctl stop cloudflared');
+        return res.json({ success: true });
+
+      case 'restart':
+        await executeSSHCommand(server, credentials, 'sudo systemctl restart cloudflared');
+        return res.json({ success: true });
+
+      default:
+        return res.status(400).json({ error: 'Unknown action' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+// WireGuard action handler
+async function handleWireGuardAction(server, credentials, config, action, res) {
+  const wgInterface = config.interface || 'wg0';
+
+  try {
+    switch (action) {
+      case 'status': {
+        const cmd = `
+          echo "=== INTERFACE ===" && ip link show ${wgInterface} 2>/dev/null && echo "UP" || echo "DOWN";
+          echo "=== WG_SHOW ===" && sudo wg show ${wgInterface} 2>/dev/null || echo "not-running";
+          echo "=== TRANSFER ===" && sudo wg show ${wgInterface} transfer 2>/dev/null || echo ""
+        `;
+        const output = await executeSSHCommand(server, credentials, cmd);
+
+        const isUp = output.includes('state UP') || (output.includes('interface:') && !output.includes('not-running'));
+        const peers = [];
+
+        // Parse WireGuard show output
+        const wgShowMatch = output.match(/=== WG_SHOW ===\s*([\s\S]*?)(=== TRANSFER ===|$)/);
+        if (wgShowMatch && wgShowMatch[1] && !wgShowMatch[1].includes('not-running')) {
+          const wgOutput = wgShowMatch[1];
+          const peerBlocks = wgOutput.split(/\n(?=peer:)/);
+
+          for (const block of peerBlocks) {
+            if (block.includes('peer:')) {
+              const peer = {};
+              const pubKeyMatch = block.match(/peer:\s*(\S+)/);
+              if (pubKeyMatch) peer.public_key = pubKeyMatch[1];
+
+              const endpointMatch = block.match(/endpoint:\s*(\S+)/);
+              if (endpointMatch) peer.endpoint = endpointMatch[1];
+
+              const allowedMatch = block.match(/allowed ips:\s*(.+)/);
+              if (allowedMatch) peer.allowed_ips = allowedMatch[1].trim();
+
+              const handshakeMatch = block.match(/latest handshake:\s*(.+)/);
+              if (handshakeMatch) {
+                const hsText = handshakeMatch[1];
+                // Convert relative time to timestamp
+                const now = Math.floor(Date.now() / 1000);
+                if (hsText.includes('second')) {
+                  const secs = parseInt(hsText) || 0;
+                  peer.latest_handshake = now - secs;
+                } else if (hsText.includes('minute')) {
+                  const mins = parseInt(hsText) || 0;
+                  peer.latest_handshake = now - (mins * 60);
+                } else if (hsText.includes('hour')) {
+                  const hrs = parseInt(hsText) || 0;
+                  peer.latest_handshake = now - (hrs * 3600);
+                }
+              }
+
+              const transferMatch = block.match(/transfer:\s*(\S+)\s+received,\s*(\S+)\s+sent/);
+              if (transferMatch) {
+                peer.rx = parseTransferBytes(transferMatch[1]);
+                peer.tx = parseTransferBytes(transferMatch[2]);
+              }
+
+              if (peer.public_key) peers.push(peer);
+            }
+          }
+        }
+
+        // Parse transfer stats if separate
+        const transferMatch = output.match(/=== TRANSFER ===\s*([\s\S]*?)$/);
+        if (transferMatch && transferMatch[1]) {
+          const lines = transferMatch[1].trim().split('\n');
+          for (const line of lines) {
+            const parts = line.split('\t');
+            if (parts.length >= 3) {
+              const pubKey = parts[0];
+              const peer = peers.find(p => p.public_key === pubKey);
+              if (peer) {
+                peer.rx = parseInt(parts[1]) || 0;
+                peer.tx = parseInt(parts[2]) || 0;
+              }
+            }
+          }
+        }
+
+        return res.json({
+          running: isUp,
+          interface: { name: wgInterface, up: isUp },
+          peers
+        });
+      }
+
+      case 'start':
+        await executeSSHCommand(server, credentials, `sudo wg-quick up ${wgInterface}`);
+        return res.json({ success: true });
+
+      case 'stop':
+        await executeSSHCommand(server, credentials, `sudo wg-quick down ${wgInterface}`);
+        return res.json({ success: true });
+
+      case 'restart':
+        await executeSSHCommand(server, credentials, `sudo wg-quick down ${wgInterface} 2>/dev/null; sudo wg-quick up ${wgInterface}`);
+        return res.json({ success: true });
+
+      default:
+        return res.status(400).json({ error: 'Unknown action' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+// Docker action handler
+async function handleDockerAction(server, credentials, config, action, container, res) {
+  try {
+    switch (action) {
+      case 'status': {
+        const cmd = `docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}|{{.Ports}}' 2>/dev/null || echo "DOCKER_ERROR"`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+
+        if (output.includes('DOCKER_ERROR') || output.includes('Cannot connect')) {
+          return res.json({ running: false, containers: [], error: 'Docker not available' });
+        }
+
+        const containers = [];
+        const lines = output.trim().split('\n').filter(l => l);
+
+        for (const line of lines) {
+          const parts = line.split('|');
+          if (parts.length >= 5) {
+            containers.push({
+              id: parts[0],
+              name: parts[1],
+              image: parts[2],
+              status: parts[3],
+              state: parts[4].toLowerCase(),
+              ports: parts[5] || ''
+            });
+          }
+        }
+
+        return res.json({
+          running: true,
+          containers
+        });
+      }
+
+      case 'container-start':
+        if (!container) return res.status(400).json({ error: 'Container ID required' });
+        await executeSSHCommand(server, credentials, `docker start ${container}`);
+        return res.json({ success: true });
+
+      case 'container-stop':
+        if (!container) return res.status(400).json({ error: 'Container ID required' });
+        await executeSSHCommand(server, credentials, `docker stop ${container}`);
+        return res.json({ success: true });
+
+      case 'container-restart':
+        if (!container) return res.status(400).json({ error: 'Container ID required' });
+        await executeSSHCommand(server, credentials, `docker restart ${container}`);
+        return res.json({ success: true });
+
+      default:
+        return res.status(400).json({ error: 'Unknown action' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+// Fail2Ban action handler
+async function handleFail2BanAction(server, credentials, config, action, jail, ip, res) {
+  try {
+    switch (action) {
+      case 'status': {
+        const cmd = `
+          echo "=== SERVICE ===" && systemctl is-active fail2ban 2>/dev/null || echo "inactive";
+          echo "=== JAILS ===" && sudo fail2ban-client status 2>/dev/null || echo "not-available"
+        `;
+        const output = await executeSSHCommand(server, credentials, cmd);
+
+        const isRunning = output.includes('active') && !output.includes('inactive');
+        const jails = [];
+
+        // Parse jail list
+        const jailListMatch = output.match(/Jail list:\s*(.+)/);
+        if (jailListMatch) {
+          const jailNames = jailListMatch[1].split(',').map(j => j.trim()).filter(j => j);
+
+          // Get status for each jail
+          if (jailNames.length > 0) {
+            const jailCmds = jailNames.map(j => `echo "=== JAIL:${j} ===" && sudo fail2ban-client status ${j} 2>/dev/null`).join('; ');
+            const jailOutput = await executeSSHCommand(server, credentials, jailCmds);
+
+            for (const jailName of jailNames) {
+              const jailMatch = jailOutput.match(new RegExp(`=== JAIL:${jailName} ===\\s*([\\s\\S]*?)(?==== JAIL:|$)`));
+              if (jailMatch) {
+                const jailData = jailMatch[1];
+                const jail = { name: jailName, enabled: true };
+
+                const failedMatch = jailData.match(/Currently failed:\s*(\d+)/);
+                if (failedMatch) jail.currently_failed = parseInt(failedMatch[1]);
+
+                const bannedMatch = jailData.match(/Currently banned:\s*(\d+)/);
+                if (bannedMatch) jail.currently_banned = parseInt(bannedMatch[1]);
+
+                const bannedIpsMatch = jailData.match(/Banned IP list:\s*(.+)/);
+                if (bannedIpsMatch && bannedIpsMatch[1].trim()) {
+                  jail.banned_ips = bannedIpsMatch[1].trim().split(/\s+/).filter(ip => ip);
+                } else {
+                  jail.banned_ips = [];
+                }
+
+                jails.push(jail);
+              }
+            }
+          }
+        }
+
+        return res.json({
+          running: isRunning,
+          jails
+        });
+      }
+
+      case 'unban':
+        if (!jail || !ip) return res.status(400).json({ error: 'Jail and IP required' });
+        await executeSSHCommand(server, credentials, `sudo fail2ban-client set ${jail} unbanip ${ip}`);
+        return res.json({ success: true });
+
+      default:
+        return res.status(400).json({ error: 'Unknown action' });
+    }
+  } catch (err) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+// Helper to parse transfer bytes like "1.5 GiB" to bytes
+function parseTransferBytes(str) {
+  if (!str) return 0;
+  const match = str.match(/([\d.]+)\s*([KMGT]i?B)?/i);
+  if (!match) return 0;
+
+  const num = parseFloat(match[1]);
+  const unit = (match[2] || 'B').toUpperCase();
+
+  const multipliers = {
+    'B': 1,
+    'KB': 1024,
+    'KIB': 1024,
+    'MB': 1024 * 1024,
+    'MIB': 1024 * 1024,
+    'GB': 1024 * 1024 * 1024,
+    'GIB': 1024 * 1024 * 1024,
+    'TB': 1024 * 1024 * 1024 * 1024,
+    'TIB': 1024 * 1024 * 1024 * 1024
+  };
+
+  return Math.floor(num * (multipliers[unit] || 1));
+}
 
 function executeSSHCommand(server, credentials, command) {
   return new Promise((resolve, reject) => {
