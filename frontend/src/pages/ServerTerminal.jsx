@@ -237,8 +237,8 @@ function TerminalTab({ serverId, session, isActive }) {
   if (!isActive) return null;
 
   return (
-    <div className="flex flex-col h-full animate-fade-in">
-      <div className="flex items-center justify-between mb-2">
+    <div className="flex flex-col animate-fade-in" style={{ height: 'calc(100vh - 240px)', minHeight: '400px' }}>
+      <div className="flex items-center justify-between mb-2 flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className={`h-2.5 w-2.5 rounded-full transition-all duration-300 ${
             connected ? 'bg-green-500 shadow-lg shadow-green-500/50' :
@@ -263,15 +263,15 @@ function TerminalTab({ serverId, session, isActive }) {
       </div>
 
       {error && (
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg text-sm mb-2 animate-slide-up">
+        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 px-4 py-3 rounded-lg text-sm mb-2 animate-slide-up flex-shrink-0">
           {error}
         </div>
       )}
 
       <div
         ref={terminalRef}
-        className="flex-1 min-h-[400px] h-full bg-[#1a1b26] rounded-lg shadow-lg terminal-container"
-        style={{ padding: '8px', overflow: 'hidden' }}
+        className="flex-1 bg-[#1a1b26] rounded-lg shadow-lg"
+        style={{ padding: '8px' }}
       />
     </div>
   );

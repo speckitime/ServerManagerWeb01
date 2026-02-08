@@ -112,58 +112,30 @@ app.get('/api/changelog', (req, res) => {
   }
 });
 
-// Settings endpoints (placeholder - can be extended with database storage)
-app.get('/api/settings', (req, res) => {
-  res.json({});
-});
+// Settings routes
+const settingsController = require('./controllers/settingsController');
+const { authenticate, authorize } = require('./middleware/auth');
 
-app.put('/api/settings', (req, res) => {
-  res.json({ success: true });
-});
-
-app.get('/api/settings/security', (req, res) => {
-  res.json({});
-});
-
-app.put('/api/settings/security', (req, res) => {
-  res.json({ success: true });
-});
-
-app.get('/api/settings/mail', (req, res) => {
-  res.json({});
-});
-
-app.put('/api/settings/mail', (req, res) => {
-  res.json({ success: true });
-});
-
-app.post('/api/settings/mail/test', (req, res) => {
-  res.json({ success: true, message: 'Test email sent' });
-});
-
-app.get('/api/settings/backup', (req, res) => {
-  res.json({});
-});
-
-app.put('/api/settings/backup', (req, res) => {
-  res.json({ success: true });
-});
+app.get('/api/settings', authenticate, authorize('admin'), settingsController.getSettings);
+app.put('/api/settings', authenticate, authorize('admin'), settingsController.updateSettings);
+app.get('/api/settings/security', authenticate, authorize('admin'), settingsController.getSecuritySettings);
+app.put('/api/settings/security', authenticate, authorize('admin'), settingsController.updateSecuritySettings);
+app.get('/api/settings/mail', authenticate, authorize('admin'), settingsController.getMailSettings);
+app.put('/api/settings/mail', authenticate, authorize('admin'), settingsController.updateMailSettings);
+app.post('/api/settings/mail/test', authenticate, authorize('admin'), settingsController.testMail);
+app.get('/api/settings/backup', authenticate, authorize('admin'), settingsController.getBackupSettings);
+app.put('/api/settings/backup', authenticate, authorize('admin'), settingsController.updateBackupSettings);
 
 // Admin endpoints
-app.get('/api/admin/logs', (req, res) => {
-  res.json([]);
-});
+app.get('/api/admin/logs', authenticate, authorize('admin'), settingsController.getLogs);
+app.get('/api/admin/backups', authenticate, authorize('admin'), settingsController.getBackups);
+app.post('/api/admin/backups', authenticate, authorize('admin'), settingsController.createBackup);
+app.delete('/api/admin/backups/:id', authenticate, authorize('admin'), settingsController.deleteBackup);
+app.get('/api/admin/backups/:id/download', authenticate, authorize('admin'), settingsController.downloadBackup);
 
-app.get('/api/admin/backups', (req, res) => {
-  res.json([]);
-});
-
-app.post('/api/admin/backups', (req, res) => {
-  res.json({ success: true });
-});
-
-app.post('/api/admin/restart', (req, res) => {
+app.post('/api/admin/restart', authenticate, authorize('admin'), (req, res) => {
   res.json({ success: true, message: 'Restart initiated' });
+  // Note: Actual restart would require process manager like PM2
 });
 
 // Update check
