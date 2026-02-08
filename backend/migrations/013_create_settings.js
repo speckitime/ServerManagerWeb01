@@ -39,7 +39,7 @@ exports.up = async function(knex) {
     table.uuid('banned_by').references('id').inTable('users').onDelete('SET NULL');
   });
 
-  // Insert default settings
+  // Insert default settings (batch insert for efficiency)
   const defaults = [
     { key: 'site_name', value: 'ServerManager' },
     { key: 'timezone', value: 'Europe/Berlin' },
@@ -63,9 +63,7 @@ exports.up = async function(knex) {
     { key: 'backup_path', value: '/var/backups/servermanager' },
   ];
 
-  for (const setting of defaults) {
-    await knex('settings').insert(setting).onConflict('key').ignore();
-  }
+  await knex('settings').insert(defaults).onConflict('key').ignore();
 };
 
 exports.down = async function(knex) {

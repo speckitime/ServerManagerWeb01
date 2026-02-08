@@ -5,14 +5,60 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const { spawn } = require('child_process');
 
-// Get all settings (grouped by category)
+// ============================================================================
+// Helper Functions (DRY - Don't Repeat Yourself)
+// ============================================================================
+
+/**
+ * Generic helper to get settings by keys with optional formatters
+ * @param {string[]} keys - Array of setting keys to fetch
+ * @param {Object} formatters - Object mapping keys to formatter functions
+ * @returns {Object} Formatted settings object
+ */
+async function getSettingsByKeys(keys, formatters = {}) {
+  const settings = await db('settings').whereIn('key', keys);
+  const result = {};
+  settings.forEach(s => {
+    if (formatters[s.key]) {
+      result[s.key] = formatters[s.key](s.value);
+    } else {
+      result[s.key] = s.value;
+    }
+  });
+  return result;
+}
+
+/**
+ * Generic helper to update settings from an object
+ * @param {Object} updates - Key-value pairs to update
+ * @param {string[]} skipIfEmpty - Keys to skip if value is empty
+ */
+async function updateSettingsFromObject(updates, skipIfEmpty = []) {
+  for (const [key, value] of Object.entries(updates)) {
+    if (skipIfEmpty.includes(key) && !value) continue;
+    await db('settings')
+      .insert({ key, value: String(value), updated_at: db.fn.now() })
+      .onConflict('key')
+      .merge({ value: String(value), updated_at: db.fn.now() });
+  }
+}
+
+// Common formatters
+const formatters = {
+  toBoolean: (v) => v === 'true',
+  toInt: (defaultVal = 0) => (v) => parseInt(v) || defaultVal,
+};
+
+// ============================================================================
+// Settings API Handlers
+// ============================================================================
+
+// Get all settings
 exports.getSettings = async (req, res) => {
   try {
     const settings = await db('settings').select('*');
     const result = {};
-    settings.forEach(s => {
-      result[s.key] = s.value;
-    });
+    settings.forEach(s => { result[s.key] = s.value; });
     res.json(result);
   } catch (err) {
     logger.error('Get settings error:', err);
@@ -23,13 +69,7 @@ exports.getSettings = async (req, res) => {
 // Update settings
 exports.updateSettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body);
     res.json({ success: true });
   } catch (err) {
     logger.error('Update settings error:', err);
@@ -41,16 +81,11 @@ exports.updateSettings = async (req, res) => {
 exports.getSecuritySettings = async (req, res) => {
   try {
     const keys = ['two_factor_enabled', 'fail2ban_enabled', 'fail2ban_max_attempts', 'fail2ban_ban_time', 'ip_whitelist'];
-    const settings = await db('settings').whereIn('key', keys);
-    const result = {};
-    settings.forEach(s => {
-      if (s.key.includes('enabled')) {
-        result[s.key] = s.value === 'true';
-      } else if (s.key.includes('_attempts') || s.key.includes('_time')) {
-        result[s.key] = parseInt(s.value) || 0;
-      } else {
-        result[s.key] = s.value;
-      }
+    const result = await getSettingsByKeys(keys, {
+      two_factor_enabled: formatters.toBoolean,
+      fail2ban_enabled: formatters.toBoolean,
+      fail2ban_max_attempts: formatters.toInt(5),
+      fail2ban_ban_time: formatters.toInt(600),
     });
     res.json(result);
   } catch (err) {
@@ -62,13 +97,7 @@ exports.getSecuritySettings = async (req, res) => {
 // Update security settings
 exports.updateSecuritySettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body);
     res.json({ success: true });
   } catch (err) {
     logger.error('Update security settings error:', err);
@@ -80,16 +109,9 @@ exports.updateSecuritySettings = async (req, res) => {
 exports.getMailSettings = async (req, res) => {
   try {
     const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_secure', 'mail_from', 'mail_from_name'];
-    const settings = await db('settings').whereIn('key', keys);
-    const result = {};
-    settings.forEach(s => {
-      if (s.key === 'smtp_port') {
-        result[s.key] = parseInt(s.value) || 587;
-      } else if (s.key === 'smtp_secure') {
-        result[s.key] = s.value === 'true';
-      } else {
-        result[s.key] = s.value;
-      }
+    const result = await getSettingsByKeys(keys, {
+      smtp_port: formatters.toInt(587),
+      smtp_secure: formatters.toBoolean,
     });
     res.json(result);
   } catch (err) {
@@ -101,14 +123,7 @@ exports.getMailSettings = async (req, res) => {
 // Update mail settings
 exports.updateMailSettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      if (key === 'smtp_password' && !value) continue; // Don't update password if empty
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body, ['smtp_password']); // Skip password if empty
     res.json({ success: true });
   } catch (err) {
     logger.error('Update mail settings error:', err);
@@ -119,10 +134,9 @@ exports.updateMailSettings = async (req, res) => {
 // Test mail settings
 exports.testMail = async (req, res) => {
   try {
-    // Get mail settings
-    const settings = await db('settings').whereIn('key', ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_secure', 'mail_from', 'mail_from_name']);
-    const mailConfig = {};
-    settings.forEach(s => mailConfig[s.key] = s.value);
+    const mailConfig = await getSettingsByKeys([
+      'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_secure', 'mail_from', 'mail_from_name'
+    ]);
 
     if (!mailConfig.smtp_host) {
       return res.status(400).json({ error: 'SMTP host not configured' });
@@ -140,16 +154,9 @@ exports.testMail = async (req, res) => {
 exports.getBackupSettings = async (req, res) => {
   try {
     const keys = ['auto_backup', 'backup_schedule', 'retention_days', 'backup_path'];
-    const settings = await db('settings').whereIn('key', keys);
-    const result = {};
-    settings.forEach(s => {
-      if (s.key === 'auto_backup') {
-        result[s.key] = s.value === 'true';
-      } else if (s.key === 'retention_days') {
-        result[s.key] = parseInt(s.value) || 30;
-      } else {
-        result[s.key] = s.value;
-      }
+    const result = await getSettingsByKeys(keys, {
+      auto_backup: formatters.toBoolean,
+      retention_days: formatters.toInt(30),
     });
     res.json(result);
   } catch (err) {
@@ -161,13 +168,7 @@ exports.getBackupSettings = async (req, res) => {
 // Update backup settings
 exports.updateBackupSettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body);
     res.json({ success: true });
   } catch (err) {
     logger.error('Update backup settings error:', err);
