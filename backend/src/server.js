@@ -138,6 +138,12 @@ app.post('/api/admin/restart', authenticate, authorize('admin'), (req, res) => {
   // Note: Actual restart would require process manager like PM2
 });
 
+// Fail2Ban management endpoints
+app.get('/api/admin/bans', authenticate, authorize('admin'), settingsController.getBannedIps);
+app.post('/api/admin/bans', authenticate, authorize('admin'), settingsController.banIp);
+app.delete('/api/admin/bans/:ip', authenticate, authorize('admin'), settingsController.unbanIp);
+app.get('/api/admin/failed-logins', authenticate, authorize('admin'), settingsController.getFailedLogins);
+
 // Update check
 app.get('/api/updates/check', (req, res) => {
   try {
@@ -191,6 +197,20 @@ setInterval(async () => {
     logger.error('Status checker error:', err);
   }
 }, 60000);
+
+// Fail2Ban cleanup - remove expired bans and old records
+const fail2ban = require('./middleware/fail2ban');
+setInterval(async () => {
+  try {
+    await fail2ban.cleanup();
+  } catch (err) {
+    logger.error('Fail2Ban cleanup error:', err);
+  }
+}, 300000); // Run every 5 minutes
+
+// Start backup scheduler
+const backupScheduler = require('./services/backupScheduler');
+backupScheduler.start(io);
 
 server.listen(config.port, () => {
   logger.info(`Server running on port ${config.port} in ${config.nodeEnv} mode`);

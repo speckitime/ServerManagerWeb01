@@ -468,9 +468,16 @@ function SecuritySettings() {
     fail2ban_ban_time: 600,
   });
   const [saving, setSaving] = useState(false);
+  const [bannedIps, setBannedIps] = useState([]);
+  const [failedLogins, setFailedLogins] = useState([]);
+  const [loadingBans, setLoadingBans] = useState(true);
+  const [showBanModal, setShowBanModal] = useState(false);
+  const [newBan, setNewBan] = useState({ ip_address: '', reason: '', duration: 3600 });
 
   useEffect(() => {
     loadSettings();
+    loadBannedIps();
+    loadFailedLogins();
   }, []);
 
   const loadSettings = async () => {
@@ -479,6 +486,26 @@ function SecuritySettings() {
       if (data) setSettings(prev => ({ ...prev, ...data }));
     } catch (err) {
       // Use defaults
+    }
+  };
+
+  const loadBannedIps = async () => {
+    try {
+      const { data } = await api.get('/admin/bans');
+      setBannedIps(data || []);
+    } catch (err) {
+      setBannedIps([]);
+    } finally {
+      setLoadingBans(false);
+    }
+  };
+
+  const loadFailedLogins = async () => {
+    try {
+      const { data } = await api.get('/admin/failed-logins');
+      setFailedLogins(data || []);
+    } catch (err) {
+      setFailedLogins([]);
     }
   };
 
@@ -492,6 +519,43 @@ function SecuritySettings() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const unbanIp = async (ip) => {
+    if (!confirm(`Are you sure you want to unban ${ip}?`)) return;
+    try {
+      await api.delete(`/admin/bans/${encodeURIComponent(ip)}`);
+      toast.success(`IP ${ip} unbanned`);
+      loadBannedIps();
+    } catch (err) {
+      toast.error('Failed to unban IP');
+    }
+  };
+
+  const banIp = async () => {
+    if (!newBan.ip_address) {
+      toast.error('IP address is required');
+      return;
+    }
+    try {
+      await api.post('/admin/bans', newBan);
+      toast.success(`IP ${newBan.ip_address} banned`);
+      setShowBanModal(false);
+      setNewBan({ ip_address: '', reason: '', duration: 3600 });
+      loadBannedIps();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Failed to ban IP');
+    }
+  };
+
+  const formatTimeRemaining = (expiresAt) => {
+    if (!expiresAt) return 'Permanent';
+    const remaining = new Date(expiresAt) - new Date();
+    if (remaining <= 0) return 'Expired';
+    const minutes = Math.floor(remaining / 60000);
+    const hours = Math.floor(minutes / 60);
+    if (hours > 0) return `${hours}h ${minutes % 60}m`;
+    return `${minutes}m`;
   };
 
   return (
@@ -559,20 +623,102 @@ function SecuritySettings() {
         </div>
       </div>
 
+      {/* Banned IPs Section */}
+      <div className="card p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Banned IPs</h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">Currently blocked IP addresses</p>
+          </div>
+          <button onClick={() => setShowBanModal(true)} className="btn-secondary text-sm flex items-center gap-2">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Ban IP
+          </button>
+        </div>
+
+        {loadingBans ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="animate-spin h-6 w-6 border-2 border-primary-500 border-t-transparent rounded-full" />
+          </div>
+        ) : bannedIps.length === 0 ? (
+          <div className="text-center py-6 bg-gray-50 dark:bg-gray-900/50 rounded-xl">
+            <svg className="mx-auto h-10 w-10 text-green-500 mb-2" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+            </svg>
+            <p className="text-gray-500 dark:text-gray-400">No banned IPs</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {bannedIps.map((ban) => (
+              <div key={ban.id} className="flex items-center justify-between p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                <div className="flex items-center gap-3">
+                  <div className="h-8 w-8 rounded-lg bg-red-100 dark:bg-red-900/50 flex items-center justify-center">
+                    <svg className="h-4 w-4 text-red-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-mono text-sm font-medium text-gray-900 dark:text-white">{ban.ip_address}</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {ban.reason || 'No reason'} • Expires: {formatTimeRemaining(ban.expires_at)}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => unbanIp(ban.ip_address)}
+                  className="px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-700 hover:bg-red-100 dark:hover:bg-red-900/50 rounded-lg transition-colors"
+                >
+                  Unban
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Recent Failed Logins Section */}
+      {failedLogins.length > 0 && (
+        <div className="card p-6">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Recent Failed Login Attempts</h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                  <th className="pb-2 font-medium">IP Address</th>
+                  <th className="pb-2 font-medium">Username</th>
+                  <th className="pb-2 font-medium">Time</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                {failedLogins.slice(0, 10).map((attempt) => (
+                  <tr key={attempt.id}>
+                    <td className="py-2 font-mono text-gray-900 dark:text-white">{attempt.ip_address}</td>
+                    <td className="py-2 text-gray-600 dark:text-gray-400">{attempt.username || '-'}</td>
+                    <td className="py-2 text-gray-500 dark:text-gray-400">{new Date(attempt.attempted_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <div className="card p-6">
         <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">IP Whitelist</h2>
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Allowed IP Addresses (one per line)
+            Allowed IP Addresses (comma separated)
           </label>
           <textarea
             className="input-field font-mono text-sm"
             rows={4}
-            placeholder="192.168.1.0/24&#10;10.0.0.1"
+            placeholder="192.168.1.1, 10.0.0.1"
             value={settings.ip_whitelist}
             onChange={(e) => setSettings({ ...settings, ip_whitelist: e.target.value })}
           />
-          <p className="text-xs text-gray-500 mt-1">Leave empty to allow all IPs. Supports CIDR notation.</p>
+          <p className="text-xs text-gray-500 mt-1">Leave empty to allow all IPs. Whitelisted IPs bypass Fail2Ban.</p>
         </div>
       </div>
 
@@ -582,6 +728,55 @@ function SecuritySettings() {
           Save Security Settings
         </button>
       </div>
+
+      {/* Ban IP Modal */}
+      {showBanModal && (
+        <div className="modal-overlay" onClick={() => setShowBanModal(false)}>
+          <div className="card p-6 w-full max-w-md animate-scale-in" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Ban IP Address</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">IP Address</label>
+                <input
+                  type="text"
+                  className="input-field font-mono"
+                  placeholder="192.168.1.1"
+                  value={newBan.ip_address}
+                  onChange={(e) => setNewBan({ ...newBan, ip_address: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Reason</label>
+                <input
+                  type="text"
+                  className="input-field"
+                  placeholder="Manual ban"
+                  value={newBan.reason}
+                  onChange={(e) => setNewBan({ ...newBan, reason: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Duration</label>
+                <select
+                  className="input-field"
+                  value={newBan.duration}
+                  onChange={(e) => setNewBan({ ...newBan, duration: e.target.value ? parseInt(e.target.value) : null })}
+                >
+                  <option value={3600}>1 hour</option>
+                  <option value={86400}>24 hours</option>
+                  <option value={604800}>7 days</option>
+                  <option value={2592000}>30 days</option>
+                  <option value="">Permanent</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowBanModal(false)} className="btn-secondary">Cancel</button>
+              <button onClick={banIp} className="btn-danger">Ban IP</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -4,9 +4,11 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
 const { validate } = require('../middleware/validator');
+const { checkBan } = require('../middleware/fail2ban');
 
 router.post(
   '/login',
+  checkBan,
   [
     body('username').notEmpty().withMessage('Username is required'),
     body('password').notEmpty().withMessage('Password is required'),

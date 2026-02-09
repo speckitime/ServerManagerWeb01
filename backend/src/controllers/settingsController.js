@@ -4,15 +4,63 @@ const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const { spawn } = require('child_process');
+const fail2ban = require('../middleware/fail2ban');
+const mailer = require('../services/mailer');
 
-// Get all settings (grouped by category)
+// ============================================================================
+// Helper Functions (DRY - Don't Repeat Yourself)
+// ============================================================================
+
+/**
+ * Generic helper to get settings by keys with optional formatters
+ * @param {string[]} keys - Array of setting keys to fetch
+ * @param {Object} formatters - Object mapping keys to formatter functions
+ * @returns {Object} Formatted settings object
+ */
+async function getSettingsByKeys(keys, formatters = {}) {
+  const settings = await db('settings').whereIn('key', keys);
+  const result = {};
+  settings.forEach(s => {
+    if (formatters[s.key]) {
+      result[s.key] = formatters[s.key](s.value);
+    } else {
+      result[s.key] = s.value;
+    }
+  });
+  return result;
+}
+
+/**
+ * Generic helper to update settings from an object
+ * @param {Object} updates - Key-value pairs to update
+ * @param {string[]} skipIfEmpty - Keys to skip if value is empty
+ */
+async function updateSettingsFromObject(updates, skipIfEmpty = []) {
+  for (const [key, value] of Object.entries(updates)) {
+    if (skipIfEmpty.includes(key) && !value) continue;
+    await db('settings')
+      .insert({ key, value: String(value), updated_at: db.fn.now() })
+      .onConflict('key')
+      .merge({ value: String(value), updated_at: db.fn.now() });
+  }
+}
+
+// Common formatters
+const formatters = {
+  toBoolean: (v) => v === 'true',
+  toInt: (defaultVal = 0) => (v) => parseInt(v) || defaultVal,
+};
+
+// ============================================================================
+// Settings API Handlers
+// ============================================================================
+
+// Get all settings
 exports.getSettings = async (req, res) => {
   try {
     const settings = await db('settings').select('*');
     const result = {};
-    settings.forEach(s => {
-      result[s.key] = s.value;
-    });
+    settings.forEach(s => { result[s.key] = s.value; });
     res.json(result);
   } catch (err) {
     logger.error('Get settings error:', err);
@@ -23,13 +71,7 @@ exports.getSettings = async (req, res) => {
 // Update settings
 exports.updateSettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body);
     res.json({ success: true });
   } catch (err) {
     logger.error('Update settings error:', err);
@@ -41,16 +83,11 @@ exports.updateSettings = async (req, res) => {
 exports.getSecuritySettings = async (req, res) => {
   try {
     const keys = ['two_factor_enabled', 'fail2ban_enabled', 'fail2ban_max_attempts', 'fail2ban_ban_time', 'ip_whitelist'];
-    const settings = await db('settings').whereIn('key', keys);
-    const result = {};
-    settings.forEach(s => {
-      if (s.key.includes('enabled')) {
-        result[s.key] = s.value === 'true';
-      } else if (s.key.includes('_attempts') || s.key.includes('_time')) {
-        result[s.key] = parseInt(s.value) || 0;
-      } else {
-        result[s.key] = s.value;
-      }
+    const result = await getSettingsByKeys(keys, {
+      two_factor_enabled: formatters.toBoolean,
+      fail2ban_enabled: formatters.toBoolean,
+      fail2ban_max_attempts: formatters.toInt(5),
+      fail2ban_ban_time: formatters.toInt(600),
     });
     res.json(result);
   } catch (err) {
@@ -62,13 +99,9 @@ exports.getSecuritySettings = async (req, res) => {
 // Update security settings
 exports.updateSecuritySettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body);
+    // Clear fail2ban cache so new settings take effect immediately
+    fail2ban.clearSettingsCache();
     res.json({ success: true });
   } catch (err) {
     logger.error('Update security settings error:', err);
@@ -76,20 +109,89 @@ exports.updateSecuritySettings = async (req, res) => {
   }
 };
 
+// Get list of banned IPs
+exports.getBannedIps = async (req, res) => {
+  try {
+    const bans = await fail2ban.getBannedIps();
+    res.json(bans.map(ban => ({
+      id: ban.id,
+      ip_address: ban.ip_address,
+      reason: ban.reason,
+      banned_at: ban.banned_at,
+      expires_at: ban.expires_at,
+    })));
+  } catch (err) {
+    logger.error('Get banned IPs error:', err);
+    res.status(500).json({ error: 'Failed to load banned IPs' });
+  }
+};
+
+// Unban an IP
+exports.unbanIp = async (req, res) => {
+  try {
+    const { ip } = req.params;
+    await fail2ban.unbanIp(ip);
+    res.json({ success: true, message: `IP ${ip} has been unbanned` });
+  } catch (err) {
+    logger.error('Unban IP error:', err);
+    res.status(500).json({ error: 'Failed to unban IP' });
+  }
+};
+
+// Manually ban an IP
+exports.banIp = async (req, res) => {
+  try {
+    const { ip_address, reason, duration } = req.body;
+
+    if (!ip_address) {
+      return res.status(400).json({ error: 'IP address is required' });
+    }
+
+    // Validate IP format (basic check)
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(ip_address)) {
+      return res.status(400).json({ error: 'Invalid IP address format' });
+    }
+
+    let expiresAt = null;
+    if (duration) {
+      expiresAt = new Date(Date.now() + parseInt(duration) * 1000);
+    }
+
+    await fail2ban.banIp(ip_address, reason, req.user?.id, expiresAt);
+    res.json({ success: true, message: `IP ${ip_address} has been banned` });
+  } catch (err) {
+    logger.error('Ban IP error:', err);
+    res.status(500).json({ error: 'Failed to ban IP' });
+  }
+};
+
+// Get failed login attempts (for monitoring)
+exports.getFailedLogins = async (req, res) => {
+  try {
+    const attempts = await db('failed_logins')
+      .orderBy('attempted_at', 'desc')
+      .limit(100);
+
+    res.json(attempts.map(a => ({
+      id: a.id,
+      ip_address: a.ip_address,
+      username: a.username,
+      attempted_at: a.attempted_at,
+    })));
+  } catch (err) {
+    logger.error('Get failed logins error:', err);
+    res.status(500).json({ error: 'Failed to load failed login attempts' });
+  }
+};
+
 // Get mail settings
 exports.getMailSettings = async (req, res) => {
   try {
     const keys = ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_secure', 'mail_from', 'mail_from_name'];
-    const settings = await db('settings').whereIn('key', keys);
-    const result = {};
-    settings.forEach(s => {
-      if (s.key === 'smtp_port') {
-        result[s.key] = parseInt(s.value) || 587;
-      } else if (s.key === 'smtp_secure') {
-        result[s.key] = s.value === 'true';
-      } else {
-        result[s.key] = s.value;
-      }
+    const result = await getSettingsByKeys(keys, {
+      smtp_port: formatters.toInt(587),
+      smtp_secure: formatters.toBoolean,
     });
     res.json(result);
   } catch (err) {
@@ -101,14 +203,9 @@ exports.getMailSettings = async (req, res) => {
 // Update mail settings
 exports.updateMailSettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      if (key === 'smtp_password' && !value) continue; // Don't update password if empty
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body, ['smtp_password']); // Skip password if empty
+    // Clear mailer cache so new settings take effect
+    mailer.clearSettingsCache();
     res.json({ success: true });
   } catch (err) {
     logger.error('Update mail settings error:', err);
@@ -119,20 +216,31 @@ exports.updateMailSettings = async (req, res) => {
 // Test mail settings
 exports.testMail = async (req, res) => {
   try {
-    // Get mail settings
-    const settings = await db('settings').whereIn('key', ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_secure', 'mail_from', 'mail_from_name']);
-    const mailConfig = {};
-    settings.forEach(s => mailConfig[s.key] = s.value);
+    const { email } = req.body;
 
-    if (!mailConfig.smtp_host) {
-      return res.status(400).json({ error: 'SMTP host not configured' });
+    // Verify connection first
+    const verification = await mailer.verifyConnection();
+    if (!verification.success) {
+      return res.status(400).json({ error: `SMTP connection failed: ${verification.message}` });
     }
 
-    // For now, just validate configuration exists
-    res.json({ success: true, message: 'Mail configuration valid. Test email would be sent to your admin email.' });
+    // Get user email or use provided email
+    let testEmail = email;
+    if (!testEmail && req.user) {
+      const user = await db('users').where({ id: req.user.id }).first();
+      testEmail = user?.email;
+    }
+
+    if (!testEmail) {
+      return res.status(400).json({ error: 'No email address provided' });
+    }
+
+    // Send test email
+    await mailer.sendTestMail(testEmail);
+    res.json({ success: true, message: `Test email sent to ${testEmail}` });
   } catch (err) {
     logger.error('Test mail error:', err);
-    res.status(500).json({ error: 'Failed to test mail configuration' });
+    res.status(500).json({ error: `Failed to send test email: ${err.message}` });
   }
 };
 
@@ -140,16 +248,9 @@ exports.testMail = async (req, res) => {
 exports.getBackupSettings = async (req, res) => {
   try {
     const keys = ['auto_backup', 'backup_schedule', 'retention_days', 'backup_path'];
-    const settings = await db('settings').whereIn('key', keys);
-    const result = {};
-    settings.forEach(s => {
-      if (s.key === 'auto_backup') {
-        result[s.key] = s.value === 'true';
-      } else if (s.key === 'retention_days') {
-        result[s.key] = parseInt(s.value) || 30;
-      } else {
-        result[s.key] = s.value;
-      }
+    const result = await getSettingsByKeys(keys, {
+      auto_backup: formatters.toBoolean,
+      retention_days: formatters.toInt(30),
     });
     res.json(result);
   } catch (err) {
@@ -161,13 +262,7 @@ exports.getBackupSettings = async (req, res) => {
 // Update backup settings
 exports.updateBackupSettings = async (req, res) => {
   try {
-    const updates = req.body;
-    for (const [key, value] of Object.entries(updates)) {
-      await db('settings')
-        .insert({ key, value: String(value), updated_at: db.fn.now() })
-        .onConflict('key')
-        .merge({ value: String(value), updated_at: db.fn.now() });
-    }
+    await updateSettingsFromObject(req.body);
     res.json({ success: true });
   } catch (err) {
     logger.error('Update backup settings error:', err);
