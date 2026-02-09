@@ -21,6 +21,15 @@ function decryptPassword(encrypted) {
  * Create SSH connection to server
  */
 async function createConnection(server) {
+  // Validate SSH credentials
+  if (!server.ssh_username) {
+    throw new Error('SSH username not configured for this server. Please update server settings.');
+  }
+
+  if (!server.ssh_password && !server.ssh_private_key) {
+    throw new Error('SSH credentials not configured. Please add password or private key in server settings.');
+  }
+
   const conn = new Client();
 
   const sshConfig = {
@@ -38,7 +47,13 @@ async function createConnection(server) {
 
   return new Promise((resolve, reject) => {
     conn.on('ready', () => resolve(conn));
-    conn.on('error', reject);
+    conn.on('error', (err) => {
+      if (err.message.includes('All configured authentication methods failed')) {
+        reject(new Error('SSH authentication failed. Please check username and password/key.'));
+      } else {
+        reject(err);
+      }
+    });
     conn.connect(sshConfig);
   });
 }

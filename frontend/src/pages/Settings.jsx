@@ -215,9 +215,10 @@ function UpdateSettings() {
     } catch (err) {
       // Changelog might not exist yet
       setChangelog([
+        { version: '1.4.3', date: '2026-02-09', changes: ['Extended monitoring (Network/IOPS/SMART)', 'Server alerts system', 'File manager', 'Firewall rules management', 'Group dashboard'] },
+        { version: '1.4.2', date: '2026-02-08', changes: ['Auto-backup scheduler', 'Email service with SMTP', 'Fail2Ban protection', 'Banned IPs management'] },
         { version: '1.4.1', date: '2026-02-08', changes: ['Fixed SSH credential update issue', 'Added dedicated addon panels with live status', 'Fixed terminal scrolling', 'Added Settings page'] },
         { version: '1.4.0', date: '2026-02-06', changes: ['Added addon/plugin system', 'Improved log viewer with templates', 'Version display in sidebar'] },
-        { version: '1.3.0', date: '2026-02-04', changes: ['Server groups and filtering', 'Activity logging', 'SSH terminal improvements'] },
       ]);
     }
   };
@@ -236,8 +237,8 @@ function UpdateSettings() {
       // Simulate for demo
       setUpdateInfo({
         updateAvailable: false,
-        currentVersion: currentVersion?.version || '1.4.1',
-        latestVersion: '1.4.1',
+        currentVersion: currentVersion?.version || '1.4.3',
+        latestVersion: '1.4.3',
       });
       toast.success('You are running the latest version');
     } finally {
@@ -284,7 +285,7 @@ function UpdateSettings() {
               <h3 className="font-semibold text-gray-900 dark:text-white">
                 {updateInfo?.updateAvailable
                   ? `Update to v${updateInfo.latestVersion} available!`
-                  : `Current Version: v${currentVersion?.version || '1.4.1'}`}
+                  : `Current Version: v${currentVersion?.version || '1.4.3'}`}
               </h3>
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 {updateInfo?.updateAvailable
