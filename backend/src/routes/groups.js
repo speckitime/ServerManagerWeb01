@@ -9,6 +9,7 @@ router.use(authenticate);
 
 router.get('/', groupController.list);
 router.get('/:id', groupController.get);
+router.get('/:id/dashboard', groupController.getDashboard);
 
 router.post(
   '/',

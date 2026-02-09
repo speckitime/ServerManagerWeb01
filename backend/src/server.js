@@ -25,6 +25,9 @@ const logRoutes = require('./routes/logs');
 const ipRoutes = require('./routes/ips');
 const scriptRoutes = require('./routes/scripts');
 const addonRoutes = require('./routes/addons');
+const alertRoutes = require('./routes/alerts');
+const fileManagerRoutes = require('./routes/fileManager');
+const firewallRoutes = require('./routes/firewall');
 
 const app = express();
 const server = http.createServer(app);
@@ -82,6 +85,9 @@ app.use('/api', logRoutes);
 app.use('/api/ips', ipRoutes);
 app.use('/api/scripts', scriptRoutes);
 app.use('/api', addonRoutes);
+app.use('/api/alerts', alertRoutes);
+app.use('/api/files', fileManagerRoutes);
+app.use('/api/firewall', firewallRoutes);
 
 // Uploads static
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
