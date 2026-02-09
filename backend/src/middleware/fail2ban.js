@@ -51,14 +51,13 @@ function clearSettingsCache() {
 
 /**
  * Get the real client IP address
+ * Uses Express's built-in req.ip which respects 'trust proxy' setting
+ * This is more secure than manually parsing X-Forwarded-For headers
  */
 function getClientIp(req) {
-  // Trust X-Forwarded-For if behind proxy
-  const forwarded = req.headers['x-forwarded-for'];
-  if (forwarded) {
-    return forwarded.split(',')[0].trim();
-  }
-  return req.ip || req.connection.remoteAddress || 'unknown';
+  // req.ip respects Express 'trust proxy' setting configured in server.js
+  // This prevents IP spoofing attacks when properly configured
+  return req.ip || req.connection?.remoteAddress || 'unknown';
 }
 
 /**
@@ -232,7 +231,9 @@ async function cleanup() {
     .del();
 
   // Remove old failed login records (older than 2x ban time)
-  const cutoff = new Date(Date.now() - settings.banTime * 2000);
+  // Calculation: banTime (seconds) * 1000 (to ms) * 2 (double retention)
+  const retentionMs = settings.banTime * 1000 * 2;
+  const cutoff = new Date(Date.now() - retentionMs);
   const oldRecords = await db('failed_logins').where('attempted_at', '<', cutoff).del();
 
   if (expiredBans > 0 || oldRecords > 0) {

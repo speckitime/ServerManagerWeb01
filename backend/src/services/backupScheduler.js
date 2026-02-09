@@ -62,6 +62,24 @@ function isBackupDue(schedule) {
   return timeSinceLastBackup >= interval;
 }
 
+// Default safe backup directory (within project structure)
+const DEFAULT_BACKUP_DIR = path.join(__dirname, '../../backups');
+// Allowed base directories for backups (prevents path traversal attacks)
+const ALLOWED_BACKUP_BASES = [
+  path.resolve(__dirname, '../../'),  // Project root
+  '/var/backups',                      // System backup dir
+  '/home',                             // User home directories
+];
+
+/**
+ * Validate that backup path is within allowed directories
+ * Prevents arbitrary directory creation/access
+ */
+function isValidBackupPath(backupPath) {
+  const resolved = path.resolve(backupPath);
+  return ALLOWED_BACKUP_BASES.some(base => resolved.startsWith(path.resolve(base)));
+}
+
 /**
  * Create a backup
  */
@@ -69,7 +87,15 @@ async function createBackup(io = null) {
   const settings = await getBackupSettings();
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const filename = `auto_backup_${timestamp}.sql.gz`;
-  const backupDir = settings.backupPath || path.join(__dirname, '../../backups');
+
+  // Validate and resolve backup directory
+  let backupDir = settings.backupPath || DEFAULT_BACKUP_DIR;
+
+  // Security: Validate backup path is within allowed directories
+  if (!isValidBackupPath(backupDir)) {
+    logger.warn(`Invalid backup path rejected: ${backupDir}. Using default.`);
+    backupDir = DEFAULT_BACKUP_DIR;
+  }
 
   // Ensure backup directory exists
   try {

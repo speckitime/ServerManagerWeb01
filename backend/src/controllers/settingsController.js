@@ -33,10 +33,13 @@ async function getSettingsByKeys(keys, formatters = {}) {
 /**
  * Generic helper to update settings from an object
  * @param {Object} updates - Key-value pairs to update
+ * @param {string[]} allowedKeys - REQUIRED: Only these keys will be updated (prevents mass assignment)
  * @param {string[]} skipIfEmpty - Keys to skip if value is empty
  */
-async function updateSettingsFromObject(updates, skipIfEmpty = []) {
+async function updateSettingsFromObject(updates, allowedKeys, skipIfEmpty = []) {
   for (const [key, value] of Object.entries(updates)) {
+    // Security: Only allow explicitly permitted keys (prevents mass assignment)
+    if (!allowedKeys.includes(key)) continue;
     if (skipIfEmpty.includes(key) && !value) continue;
     await db('settings')
       .insert({ key, value: String(value), updated_at: db.fn.now() })
@@ -44,6 +47,14 @@ async function updateSettingsFromObject(updates, skipIfEmpty = []) {
       .merge({ value: String(value), updated_at: db.fn.now() });
   }
 }
+
+// Allowed keys for each settings category (prevents mass assignment vulnerability)
+const ALLOWED_KEYS = {
+  general: ['site_name', 'timezone', 'date_format', 'session_timeout'],
+  security: ['two_factor_enabled', 'fail2ban_enabled', 'fail2ban_max_attempts', 'fail2ban_ban_time', 'ip_whitelist'],
+  mail: ['smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_secure', 'mail_from', 'mail_from_name'],
+  backup: ['auto_backup', 'backup_schedule', 'retention_days', 'backup_path'],
+};
 
 // Common formatters
 const formatters = {
@@ -68,10 +79,10 @@ exports.getSettings = async (req, res) => {
   }
 };
 
-// Update settings
+// Update settings (general)
 exports.updateSettings = async (req, res) => {
   try {
-    await updateSettingsFromObject(req.body);
+    await updateSettingsFromObject(req.body, ALLOWED_KEYS.general);
     res.json({ success: true });
   } catch (err) {
     logger.error('Update settings error:', err);
@@ -99,7 +110,7 @@ exports.getSecuritySettings = async (req, res) => {
 // Update security settings
 exports.updateSecuritySettings = async (req, res) => {
   try {
-    await updateSettingsFromObject(req.body);
+    await updateSettingsFromObject(req.body, ALLOWED_KEYS.security);
     // Clear fail2ban cache so new settings take effect immediately
     fail2ban.clearSettingsCache();
     res.json({ success: true });
@@ -138,6 +149,36 @@ exports.unbanIp = async (req, res) => {
   }
 };
 
+/**
+ * Validate IP address format (IPv4 or IPv6)
+ * Checks that IPv4 octets are in valid range (0-255)
+ */
+function isValidIpAddress(ip) {
+  // IPv4 validation with octet range check
+  const ipv4Regex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+  const ipv4Match = ip.match(ipv4Regex);
+  if (ipv4Match) {
+    // Check each octet is 0-255
+    return ipv4Match.slice(1, 5).every(octet => {
+      const num = parseInt(octet, 10);
+      return num >= 0 && num <= 255;
+    });
+  }
+
+  // IPv6 validation (simplified - accepts standard formats)
+  const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
+  if (ipv6Regex.test(ip)) {
+    return true;
+  }
+
+  // IPv6 loopback
+  if (ip === '::1') {
+    return true;
+  }
+
+  return false;
+}
+
 // Manually ban an IP
 exports.banIp = async (req, res) => {
   try {
@@ -147,10 +188,9 @@ exports.banIp = async (req, res) => {
       return res.status(400).json({ error: 'IP address is required' });
     }
 
-    // Validate IP format (basic check)
-    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
-    if (!ipRegex.test(ip_address)) {
-      return res.status(400).json({ error: 'Invalid IP address format' });
+    // Validate IP format with proper range checking
+    if (!isValidIpAddress(ip_address)) {
+      return res.status(400).json({ error: 'Invalid IP address format. Must be valid IPv4 (e.g., 192.168.1.1) or IPv6.' });
     }
 
     let expiresAt = null;
@@ -203,7 +243,7 @@ exports.getMailSettings = async (req, res) => {
 // Update mail settings
 exports.updateMailSettings = async (req, res) => {
   try {
-    await updateSettingsFromObject(req.body, ['smtp_password']); // Skip password if empty
+    await updateSettingsFromObject(req.body, ALLOWED_KEYS.mail, ['smtp_password']); // Skip password if empty
     // Clear mailer cache so new settings take effect
     mailer.clearSettingsCache();
     res.json({ success: true });
@@ -262,7 +302,7 @@ exports.getBackupSettings = async (req, res) => {
 // Update backup settings
 exports.updateBackupSettings = async (req, res) => {
   try {
-    await updateSettingsFromObject(req.body);
+    await updateSettingsFromObject(req.body, ALLOWED_KEYS.backup);
     res.json({ success: true });
   } catch (err) {
     logger.error('Update backup settings error:', err);

@@ -29,6 +29,10 @@ const addonRoutes = require('./routes/addons');
 const app = express();
 const server = http.createServer(app);
 
+// Trust proxy - required for correct client IP when behind reverse proxy (nginx, etc.)
+// This makes req.ip return the correct client IP from X-Forwarded-For
+app.set('trust proxy', 1);
+
 // Socket.io setup
 const io = new SocketIOServer(server, {
   cors: {
