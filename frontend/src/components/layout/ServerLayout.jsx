@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { NavLink, Outlet, useParams, Link } from 'react-router-dom';
+import { NavLink, Outlet, useParams, Link, useLocation } from 'react-router-dom';
 import api from '../../services/api';
 
 const tabs = [
@@ -9,13 +9,17 @@ const tabs = [
   { path: '/packages', label: 'Packages' },
   { path: '/logs', label: 'Logs' },
   { path: '/tasks', label: 'Tasks' },
+  { path: '/files', label: 'Files', linuxOnly: true },
+  { path: '/firewall', label: 'Firewall', linuxOnly: true },
   { path: '/documents', label: 'Docs' },
-  { path: '/addons', label: 'Addons', icon: '🔌' },
+  { path: '/addons', label: 'Addons' },
 ];
 
 export default function ServerLayout() {
   const { id } = useParams();
+  const location = useLocation();
   const [server, setServer] = useState(null);
+  const isTerminalPage = location.pathname.includes('/terminal');
 
   useEffect(() => {
     api.get(`/servers/${id}`).then(({ data }) => setServer(data)).catch(() => {});
@@ -77,8 +81,8 @@ export default function ServerLayout() {
         </nav>
       </div>
 
-      {/* Page content */}
-      <div className="flex-1 overflow-y-auto pt-6">
+      {/* Page content - NO overflow for terminal page to let xterm control scrolling */}
+      <div className={`flex-1 pt-6 ${isTerminalPage ? 'overflow-hidden' : 'overflow-y-auto'}`}>
         <Outlet />
       </div>
     </div>
