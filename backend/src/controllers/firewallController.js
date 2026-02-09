@@ -1,48 +1,53 @@
 const { Client } = require('ssh2');
 const db = require('../config/database');
 const logger = require('../services/logger');
-const CryptoJS = require('crypto-js');
-const config = require('../config/app');
-
-/**
- * Decrypt SSH password
- */
-function decryptPassword(encrypted) {
-  if (!encrypted) return null;
-  try {
-    const bytes = CryptoJS.AES.decrypt(encrypted, config.encryptionKey);
-    return bytes.toString(CryptoJS.enc.Utf8);
-  } catch {
-    return null;
-  }
-}
+const { decryptCredentials } = require('../services/encryption');
 
 /**
  * Create SSH connection to server
  */
 async function createConnection(server) {
-  // Validate SSH credentials
-  if (!server.ssh_username) {
-    throw new Error('SSH username not configured for this server. Please update server settings.');
+  // Decrypt SSH credentials
+  let credentials = null;
+  if (server.ssh_credentials_encrypted) {
+    try {
+      credentials = decryptCredentials(server.ssh_credentials_encrypted);
+    } catch (e) {
+      logger.error('Failed to decrypt SSH credentials:', e);
+    }
   }
 
-  if (!server.ssh_password && !server.ssh_private_key) {
-    throw new Error('SSH credentials not configured. Please add password or private key in server settings.');
+  if (!credentials || !credentials.username) {
+    throw new Error('SSH credentials not configured. Please edit the server to add SSH username and password.');
   }
 
   const conn = new Client();
 
   const sshConfig = {
-    host: server.hostname,
+    host: server.ip_address || server.hostname,
     port: server.ssh_port || 22,
-    username: server.ssh_username,
+    username: credentials.username,
     readyTimeout: 10000,
   };
 
-  if (server.ssh_private_key) {
-    sshConfig.privateKey = server.ssh_private_key;
-  } else if (server.ssh_password) {
-    sshConfig.password = decryptPassword(server.ssh_password);
+  // Add private key if available
+  if (server.ssh_private_key_encrypted) {
+    try {
+      const keyData = decryptCredentials(server.ssh_private_key_encrypted);
+      if (keyData && keyData.key) {
+        sshConfig.privateKey = keyData.key;
+        if (credentials.passphrase) {
+          sshConfig.passphrase = credentials.passphrase;
+        }
+      }
+    } catch (e) {
+      logger.error('Failed to decrypt SSH key:', e);
+    }
+  }
+
+  // Add password if available
+  if (credentials.password) {
+    sshConfig.password = credentials.password;
   }
 
   return new Promise((resolve, reject) => {
