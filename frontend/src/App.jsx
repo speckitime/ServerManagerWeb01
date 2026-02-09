@@ -14,6 +14,8 @@ import ServerLogs from './pages/ServerLogs';
 import ServerTasks from './pages/ServerTasks';
 import ServerDocuments from './pages/ServerDocuments';
 import ServerAddons from './pages/ServerAddons';
+import ServerFileManager from './pages/ServerFileManager';
+import ServerFirewall from './pages/ServerFirewall';
 import Users from './pages/Users';
 import IpOverview from './pages/IpOverview';
 import ActivityLog from './pages/ActivityLog';
@@ -21,6 +23,8 @@ import Profile from './pages/Profile';
 import Scripts from './pages/Scripts';
 import Addons from './pages/Addons';
 import Settings from './pages/Settings';
+import Alerts from './pages/Alerts';
+import GroupDashboard from './pages/GroupDashboard';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -67,7 +71,12 @@ export default function App() {
           <Route path="tasks" element={<ServerTasks />} />
           <Route path="documents" element={<ServerDocuments />} />
           <Route path="addons" element={<ServerAddons />} />
+          <Route path="files" element={<ServerFileManager />} />
+          <Route path="firewall" element={<ServerFirewall />} />
         </Route>
+
+        {/* Group Dashboard */}
+        <Route path="groups/:id/dashboard" element={<GroupDashboard />} />
 
         <Route
           path="scripts"
@@ -82,6 +91,7 @@ export default function App() {
           element={<AdminRoute><Users /></AdminRoute>}
         />
         <Route path="ips" element={<IpOverview />} />
+        <Route path="alerts" element={<Alerts />} />
         <Route
           path="activity"
           element={<AdminRoute><ActivityLog /></AdminRoute>}
