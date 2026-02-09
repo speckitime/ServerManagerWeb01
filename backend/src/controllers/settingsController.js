@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
 const { spawn } = require('child_process');
+const fail2ban = require('../middleware/fail2ban');
 
 // ============================================================================
 // Helper Functions (DRY - Don't Repeat Yourself)
@@ -98,10 +99,88 @@ exports.getSecuritySettings = async (req, res) => {
 exports.updateSecuritySettings = async (req, res) => {
   try {
     await updateSettingsFromObject(req.body);
+    // Clear fail2ban cache so new settings take effect immediately
+    fail2ban.clearSettingsCache();
     res.json({ success: true });
   } catch (err) {
     logger.error('Update security settings error:', err);
     res.status(500).json({ error: 'Failed to update security settings' });
+  }
+};
+
+// Get list of banned IPs
+exports.getBannedIps = async (req, res) => {
+  try {
+    const bans = await fail2ban.getBannedIps();
+    res.json(bans.map(ban => ({
+      id: ban.id,
+      ip_address: ban.ip_address,
+      reason: ban.reason,
+      banned_at: ban.banned_at,
+      expires_at: ban.expires_at,
+    })));
+  } catch (err) {
+    logger.error('Get banned IPs error:', err);
+    res.status(500).json({ error: 'Failed to load banned IPs' });
+  }
+};
+
+// Unban an IP
+exports.unbanIp = async (req, res) => {
+  try {
+    const { ip } = req.params;
+    await fail2ban.unbanIp(ip);
+    res.json({ success: true, message: `IP ${ip} has been unbanned` });
+  } catch (err) {
+    logger.error('Unban IP error:', err);
+    res.status(500).json({ error: 'Failed to unban IP' });
+  }
+};
+
+// Manually ban an IP
+exports.banIp = async (req, res) => {
+  try {
+    const { ip_address, reason, duration } = req.body;
+
+    if (!ip_address) {
+      return res.status(400).json({ error: 'IP address is required' });
+    }
+
+    // Validate IP format (basic check)
+    const ipRegex = /^(\d{1,3}\.){3}\d{1,3}$/;
+    if (!ipRegex.test(ip_address)) {
+      return res.status(400).json({ error: 'Invalid IP address format' });
+    }
+
+    let expiresAt = null;
+    if (duration) {
+      expiresAt = new Date(Date.now() + parseInt(duration) * 1000);
+    }
+
+    await fail2ban.banIp(ip_address, reason, req.user?.id, expiresAt);
+    res.json({ success: true, message: `IP ${ip_address} has been banned` });
+  } catch (err) {
+    logger.error('Ban IP error:', err);
+    res.status(500).json({ error: 'Failed to ban IP' });
+  }
+};
+
+// Get failed login attempts (for monitoring)
+exports.getFailedLogins = async (req, res) => {
+  try {
+    const attempts = await db('failed_logins')
+      .orderBy('attempted_at', 'desc')
+      .limit(100);
+
+    res.json(attempts.map(a => ({
+      id: a.id,
+      ip_address: a.ip_address,
+      username: a.username,
+      attempted_at: a.attempted_at,
+    })));
+  } catch (err) {
+    logger.error('Get failed logins error:', err);
+    res.status(500).json({ error: 'Failed to load failed login attempts' });
   }
 };
 

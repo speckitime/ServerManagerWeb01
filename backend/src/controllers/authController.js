@@ -5,6 +5,7 @@ const QRCode = require('qrcode');
 const config = require('../config/app');
 const db = require('../config/database');
 const logger = require('../services/logger');
+const fail2ban = require('../middleware/fail2ban');
 
 const generateTokens = (userId) => {
   const accessToken = jwt.sign({ userId }, config.jwt.secret, {
@@ -19,6 +20,7 @@ const generateTokens = (userId) => {
 exports.login = async (req, res) => {
   try {
     const { username, password, totp_code } = req.body;
+    const clientIp = fail2ban.getClientIp(req);
 
     const user = await db('users')
       .where(function () {
@@ -28,12 +30,34 @@ exports.login = async (req, res) => {
       .first();
 
     if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      // Record failed attempt
+      const result = await fail2ban.recordFailedAttempt(clientIp, username);
+      if (result.banned) {
+        return res.status(403).json({
+          error: 'Too many failed attempts',
+          message: 'Your IP has been temporarily banned',
+        });
+      }
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        attemptsRemaining: result.attemptsRemaining,
+      });
     }
 
     const validPassword = await bcrypt.compare(password, user.password_hash);
     if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      // Record failed attempt
+      const result = await fail2ban.recordFailedAttempt(clientIp, username);
+      if (result.banned) {
+        return res.status(403).json({
+          error: 'Too many failed attempts',
+          message: 'Your IP has been temporarily banned',
+        });
+      }
+      return res.status(401).json({
+        error: 'Invalid credentials',
+        attemptsRemaining: result.attemptsRemaining,
+      });
     }
 
     if (user.totp_enabled) {
@@ -46,9 +70,23 @@ exports.login = async (req, res) => {
         token: totp_code,
       });
       if (!verified) {
-        return res.status(401).json({ error: 'Invalid 2FA code' });
+        // Record failed 2FA attempt
+        const result = await fail2ban.recordFailedAttempt(clientIp, username);
+        if (result.banned) {
+          return res.status(403).json({
+            error: 'Too many failed attempts',
+            message: 'Your IP has been temporarily banned',
+          });
+        }
+        return res.status(401).json({
+          error: 'Invalid 2FA code',
+          attemptsRemaining: result.attemptsRemaining,
+        });
       }
     }
+
+    // Successful login - clear failed attempts
+    await fail2ban.clearFailedAttempts(clientIp);
 
     await db('users').where({ id: user.id }).update({ last_login: new Date() });
 
@@ -56,7 +94,7 @@ exports.login = async (req, res) => {
       user_id: user.id,
       action: 'login',
       details: 'User logged in',
-      ip_address: req.ip,
+      ip_address: clientIp,
     });
 
     const tokens = generateTokens(user.id);
