@@ -48,6 +48,7 @@ exports.createRule = async (req, res) => {
         threshold,
         duration_seconds: duration_seconds || 60,
         severity: severity || 'warning',
+        is_active: true,
         notify_email: notify_email !== false,
         notify_webhook: notify_webhook || false,
         webhook_url,

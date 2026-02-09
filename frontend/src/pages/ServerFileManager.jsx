@@ -97,8 +97,15 @@ export default function ServerFileManager() {
       return;
     }
 
+    // Sanitize name to prevent path traversal
+    const sanitizedName = newItem.name.replace(/\.\./g, '').replace(/\//g, '');
+    if (!sanitizedName) {
+      toast.error('Invalid name');
+      return;
+    }
+
     try {
-      const itemPath = `${currentPath}/${newItem.name}`.replace(/\/+/g, '/');
+      const itemPath = `${currentPath}/${sanitizedName}`.replace(/\/+/g, '/');
       await api.post(`/files/${serverId}/create`, {
         path: itemPath,
         type: newItem.type,
