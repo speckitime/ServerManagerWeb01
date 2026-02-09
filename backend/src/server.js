@@ -208,6 +208,10 @@ setInterval(async () => {
   }
 }, 300000); // Run every 5 minutes
 
+// Start backup scheduler
+const backupScheduler = require('./services/backupScheduler');
+backupScheduler.start(io);
+
 server.listen(config.port, () => {
   logger.info(`Server running on port ${config.port} in ${config.nodeEnv} mode`);
   console.log(`Server Manager API running on http://localhost:${config.port}`);

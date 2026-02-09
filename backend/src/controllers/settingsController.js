@@ -5,6 +5,7 @@ const fs = require('fs').promises;
 const fsSync = require('fs');
 const { spawn } = require('child_process');
 const fail2ban = require('../middleware/fail2ban');
+const mailer = require('../services/mailer');
 
 // ============================================================================
 // Helper Functions (DRY - Don't Repeat Yourself)
@@ -203,6 +204,8 @@ exports.getMailSettings = async (req, res) => {
 exports.updateMailSettings = async (req, res) => {
   try {
     await updateSettingsFromObject(req.body, ['smtp_password']); // Skip password if empty
+    // Clear mailer cache so new settings take effect
+    mailer.clearSettingsCache();
     res.json({ success: true });
   } catch (err) {
     logger.error('Update mail settings error:', err);
@@ -213,19 +216,31 @@ exports.updateMailSettings = async (req, res) => {
 // Test mail settings
 exports.testMail = async (req, res) => {
   try {
-    const mailConfig = await getSettingsByKeys([
-      'smtp_host', 'smtp_port', 'smtp_user', 'smtp_password', 'smtp_secure', 'mail_from', 'mail_from_name'
-    ]);
+    const { email } = req.body;
 
-    if (!mailConfig.smtp_host) {
-      return res.status(400).json({ error: 'SMTP host not configured' });
+    // Verify connection first
+    const verification = await mailer.verifyConnection();
+    if (!verification.success) {
+      return res.status(400).json({ error: `SMTP connection failed: ${verification.message}` });
     }
 
-    // For now, just validate configuration exists
-    res.json({ success: true, message: 'Mail configuration valid. Test email would be sent to your admin email.' });
+    // Get user email or use provided email
+    let testEmail = email;
+    if (!testEmail && req.user) {
+      const user = await db('users').where({ id: req.user.id }).first();
+      testEmail = user?.email;
+    }
+
+    if (!testEmail) {
+      return res.status(400).json({ error: 'No email address provided' });
+    }
+
+    // Send test email
+    await mailer.sendTestMail(testEmail);
+    res.json({ success: true, message: `Test email sent to ${testEmail}` });
   } catch (err) {
     logger.error('Test mail error:', err);
-    res.status(500).json({ error: 'Failed to test mail configuration' });
+    res.status(500).json({ error: `Failed to send test email: ${err.message}` });
   }
 };
 
