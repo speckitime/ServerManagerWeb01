@@ -1,5 +1,23 @@
 [
   {
+    "version": "1.4.3",
+    "date": "2026-02-09",
+    "changes": [
+      "Implemented real Fail2Ban protection with IP banning",
+      "Added auto-backup scheduler with configurable schedules",
+      "Added email service with SMTP support and HTML templates",
+      "Added banned IPs management UI in Security settings",
+      "Added failed login attempts monitoring",
+      "Fixed IP spoofing vulnerability in Fail2Ban",
+      "Fixed mass assignment vulnerability in settings",
+      "Added extended server monitoring (Network/IOPS/SMART)",
+      "Added server alerts system with threshold notifications",
+      "Added server group dashboard",
+      "Added file manager for remote servers",
+      "Added firewall rules management (UFW/iptables)"
+    ]
+  },
+  {
     "version": "1.4.2",
     "date": "2026-02-08",
     "changes": [
