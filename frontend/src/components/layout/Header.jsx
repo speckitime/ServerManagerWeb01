@@ -1,10 +1,13 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import useAuthStore from '../../store/authStore';
+import LanguageSwitcher from '../LanguageSwitcher';
 
 export default function Header({ onMenuClick }) {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const toggleTheme = () => {
@@ -32,6 +35,9 @@ export default function Header({ onMenuClick }) {
       <div className="flex-1" />
 
       <div className="flex items-center gap-3">
+        {/* Language switcher */}
+        <LanguageSwitcher />
+
         {/* Theme toggle */}
         <button
           onClick={toggleTheme}
@@ -69,13 +75,13 @@ export default function Header({ onMenuClick }) {
                   className="block px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700"
                   onClick={() => setDropdownOpen(false)}
                 >
-                  Profile Settings
+                  {t('nav.profile')}
                 </Link>
                 <button
                   onClick={handleLogout}
                   className="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
-                  Logout
+                  {t('nav.logout')}
                 </button>
               </div>
             </>
