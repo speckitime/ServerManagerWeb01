@@ -215,6 +215,7 @@ function UpdateSettings() {
     } catch (err) {
       // Changelog might not exist yet
       setChangelog([
+        { version: '1.5.0', date: '2026-04-12', changes: ['SSH Identity Vault (generate/import/assign keys)', 'RSA, ED25519, ECDSA key generation', 'Identity-based SSH auth for Terminal, File Manager, Firewall'] },
         { version: '1.4.3', date: '2026-02-09', changes: ['Extended monitoring (Network/IOPS/SMART)', 'Server alerts system', 'File manager', 'Firewall rules management', 'Group dashboard'] },
         { version: '1.4.2', date: '2026-02-08', changes: ['Auto-backup scheduler', 'Email service with SMTP', 'Fail2Ban protection', 'Banned IPs management'] },
         { version: '1.4.1', date: '2026-02-08', changes: ['Fixed SSH credential update issue', 'Added dedicated addon panels with live status', 'Fixed terminal scrolling', 'Added Settings page'] },
@@ -237,8 +238,8 @@ function UpdateSettings() {
       // Simulate for demo
       setUpdateInfo({
         updateAvailable: false,
-        currentVersion: currentVersion?.version || '1.4.3',
-        latestVersion: '1.4.3',
+        currentVersion: currentVersion?.version || '1.5.0',
+        latestVersion: '1.5.0',
       });
       toast.success('You are running the latest version');
     } finally {

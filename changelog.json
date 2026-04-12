@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.5.0",
+    "date": "2026-04-12",
+    "changes": [
+      "Added SSH Identity Vault (Termius-style key management)",
+      "Generate RSA (2048/4096), ED25519, ECDSA (256/384/521) key pairs",
+      "Import existing SSH keys",
+      "Assign identities to servers",
+      "Export public/private keys",
+      "Terminal, File Manager and Firewall all support identity-based auth"
+    ]
+  },
+  {
     "version": "1.4.3",
     "date": "2026-02-09",
     "changes": [

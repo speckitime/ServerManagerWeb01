@@ -132,7 +132,32 @@ module.exports = (io) => {
           },
         };
 
-        if (server.ssh_private_key_encrypted) {
+        // Use SSH Identity if assigned to the server (overrides stored key)
+        let identityKeyLoaded = false;
+        if (server.ssh_identity_id) {
+          try {
+            const identity = await db('ssh_identities').where({ id: server.ssh_identity_id }).first();
+            if (identity) {
+              const keyData = decryptCredentials(identity.private_key_encrypted);
+              if (keyData && keyData.key) {
+                sshConfig.privateKey = keyData.key;
+                if (identity.has_passphrase && identity.passphrase_encrypted) {
+                  const ppData = decryptCredentials(identity.passphrase_encrypted);
+                  if (ppData && ppData.passphrase) {
+                    sshConfig.passphrase = ppData.passphrase;
+                  }
+                }
+                identityKeyLoaded = true;
+                logger.debug(`Using SSH identity "${identity.name}" for server ${server.hostname}`);
+              }
+            }
+          } catch (e) {
+            logger.error('Failed to load SSH identity:', e);
+          }
+        }
+
+        // Fall back to server's stored private key if no identity
+        if (!identityKeyLoaded && server.ssh_private_key_encrypted) {
           try {
             const keyData = decryptCredentials(server.ssh_private_key_encrypted);
             if (keyData && keyData.key) {

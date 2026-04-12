@@ -316,11 +316,17 @@ function ServerFormModal({ server, groups, onClose, onSaved }) {
     ssh_username: server?.ssh_username || '',
     ssh_password: '',
     ssh_private_key: '',
+    ssh_identity_id: server?.ssh_identity_id || '',
     rdp_username: server?.rdp_username || '',
     rdp_password: '',
   });
   const [saving, setSaving] = useState(false);
   const [showCredentials, setShowCredentials] = useState(!isEdit);
+  const [identities, setIdentities] = useState([]);
+
+  useEffect(() => {
+    api.get('/ssh-identities').then(({ data }) => setIdentities(data)).catch(() => {});
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -336,6 +342,7 @@ function ServerFormModal({ server, groups, onClose, onSaved }) {
         ssh_port: parseInt(form.ssh_port, 10),
         rdp_port: parseInt(form.rdp_port, 10),
         group_id: form.group_id || null,
+        ssh_identity_id: form.ssh_identity_id || null,
       };
 
       if (form.ssh_username) {
@@ -444,6 +451,29 @@ function ServerFormModal({ server, groups, onClose, onSaved }) {
                       <input type="password" className="input-field" placeholder={isEdit ? '(enter to update)' : ''} value={form.ssh_password} onChange={(e) => setForm({ ...form, ssh_password: e.target.value })} />
                     </div>
                   </div>
+                  {/* SSH Identity Vault */}
+                  {identities.length > 0 && (
+                    <div className="mt-3">
+                      <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        SSH Identity (Vault Key)
+                      </label>
+                      <select
+                        className="input-field"
+                        value={form.ssh_identity_id}
+                        onChange={(e) => setForm({ ...form, ssh_identity_id: e.target.value })}
+                      >
+                        <option value="">— None (use password or key above) —</option>
+                        {identities.map((id) => (
+                          <option key={id.id} value={id.id}>
+                            {id.name} ({id.key_type.toUpperCase()}{id.key_bits ? `-${id.key_bits}` : ''})
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Identity keys from the SSH Vault override the private key field below.
+                      </p>
+                    </div>
+                  )}
                   <div className="mt-3">
                     <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">SSH Private Key (PEM)</label>
                     <textarea className="input-field font-mono text-xs" rows={4} placeholder={"-----BEGIN OPENSSH PRIVATE KEY-----\n..."} value={form.ssh_private_key} onChange={(e) => setForm({ ...form, ssh_private_key: e.target.value })} />

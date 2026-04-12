@@ -6,6 +6,7 @@ import api from '../../services/api';
 const navigation = [
   { name: 'Dashboard', href: '/', icon: DashboardIcon },
   { name: 'Servers', href: '/servers', icon: ServerIcon },
+  { name: 'SSH Vault', href: '/ssh-identities', icon: KeyVaultIcon },
   { name: 'Alerts', href: '/alerts', icon: AlertsIcon },
   { name: 'Scripts', href: '/scripts', icon: ScriptsIcon, adminOnly: true },
   { name: 'Addons', href: '/addons', icon: AddonsIcon, adminOnly: true },
@@ -158,6 +159,14 @@ function AlertsIcon({ className }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0" />
+    </svg>
+  );
+}
+
+function KeyVaultIcon({ className }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z" />
     </svg>
   );
 }

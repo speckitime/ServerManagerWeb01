@@ -4,10 +4,10 @@ const logger = require('../services/logger');
 const { decryptCredentials } = require('../services/encryption');
 
 /**
- * Create SSH connection to server
+ * Create SSH connection to server (supports SSH identities)
  */
 async function createConnection(server) {
-  // Decrypt SSH credentials
+  // Decrypt SSH credentials (username from here)
   let credentials = null;
   if (server.ssh_credentials_encrypted) {
     try {
@@ -30,22 +30,41 @@ async function createConnection(server) {
     readyTimeout: 10000,
   };
 
-  // Add private key if available
-  if (server.ssh_private_key_encrypted) {
+  // Prefer SSH Identity key if assigned
+  let identityKeyLoaded = false;
+  if (server.ssh_identity_id) {
+    try {
+      const identity = await db('ssh_identities').where({ id: server.ssh_identity_id }).first();
+      if (identity) {
+        const keyData = decryptCredentials(identity.private_key_encrypted);
+        if (keyData && keyData.key) {
+          sshConfig.privateKey = keyData.key;
+          if (identity.has_passphrase && identity.passphrase_encrypted) {
+            const ppData = decryptCredentials(identity.passphrase_encrypted);
+            if (ppData && ppData.passphrase) sshConfig.passphrase = ppData.passphrase;
+          }
+          identityKeyLoaded = true;
+        }
+      }
+    } catch (e) {
+      logger.error('Failed to load SSH identity:', e);
+    }
+  }
+
+  // Fall back to server's stored private key
+  if (!identityKeyLoaded && server.ssh_private_key_encrypted) {
     try {
       const keyData = decryptCredentials(server.ssh_private_key_encrypted);
       if (keyData && keyData.key) {
         sshConfig.privateKey = keyData.key;
-        if (credentials.passphrase) {
-          sshConfig.passphrase = credentials.passphrase;
-        }
+        if (credentials.passphrase) sshConfig.passphrase = credentials.passphrase;
       }
     } catch (e) {
       logger.error('Failed to decrypt SSH key:', e);
     }
   }
 
-  // Add password if available
+  // Password auth
   if (credentials.password) {
     sshConfig.password = credentials.password;
   }
