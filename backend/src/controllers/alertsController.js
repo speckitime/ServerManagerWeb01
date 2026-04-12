@@ -14,10 +14,11 @@ exports.getRules = async (req, res) => {
       )
       .orderBy('alert_rules.created_at', 'desc');
 
+    logger.debug(`Found ${rules.length} alert rules`);
     res.json(rules);
   } catch (err) {
     logger.error('Get alert rules error:', err);
-    res.status(500).json({ error: 'Failed to load alert rules' });
+    res.status(500).json({ error: err.message || 'Failed to load alert rules' });
   }
 };
 
@@ -38,28 +39,37 @@ exports.createRule = async (req, res) => {
       webhook_url,
     } = req.body;
 
-    const [rule] = await db('alert_rules')
-      .insert({
-        server_id: server_id || null,
-        group_id: group_id || null,
-        name,
-        metric,
-        condition,
-        threshold,
-        duration_seconds: duration_seconds || 60,
-        severity: severity || 'warning',
-        is_active: true,
-        notify_email: notify_email !== false,
-        notify_webhook: notify_webhook || false,
-        webhook_url,
-        created_by: req.user?.id,
-      })
-      .returning('*');
+    if (!name || !metric || !condition || threshold === undefined) {
+      return res.status(400).json({ error: 'Name, metric, condition, and threshold are required' });
+    }
+
+    const insertData = {
+      server_id: server_id || null,
+      group_id: group_id || null,
+      name,
+      metric,
+      condition,
+      threshold: parseFloat(threshold),
+      duration_seconds: duration_seconds || 60,
+      severity: severity || 'warning',
+      is_active: true,
+      notify_email: notify_email !== false,
+      notify_webhook: notify_webhook || false,
+      webhook_url: webhook_url || null,
+      created_by: req.user?.id,
+    };
+
+    logger.info('Creating alert rule:', insertData);
+
+    const result = await db('alert_rules').insert(insertData).returning('*');
+    const rule = result[0];
+
+    logger.info('Alert rule created:', rule);
 
     res.json(rule);
   } catch (err) {
     logger.error('Create alert rule error:', err);
-    res.status(500).json({ error: 'Failed to create alert rule' });
+    res.status(500).json({ error: err.message || 'Failed to create alert rule' });
   }
 };
 

@@ -28,6 +28,7 @@ const addonRoutes = require('./routes/addons');
 const alertRoutes = require('./routes/alerts');
 const fileManagerRoutes = require('./routes/fileManager');
 const firewallRoutes = require('./routes/firewall');
+const sshIdentityRoutes = require('./routes/sshIdentities');
 
 const app = express();
 const server = http.createServer(app);
@@ -88,6 +89,7 @@ app.use('/api', addonRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/files', fileManagerRoutes);
 app.use('/api/firewall', firewallRoutes);
+app.use('/api/ssh-identities', sshIdentityRoutes);
 
 // Uploads static
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));

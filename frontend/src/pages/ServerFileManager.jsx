@@ -97,10 +97,11 @@ export default function ServerFileManager() {
       return;
     }
 
-    // Sanitize name to prevent path traversal
-    const sanitizedName = newItem.name.replace(/\.\./g, '').replace(/\//g, '');
-    if (!sanitizedName) {
-      toast.error('Invalid name');
+    // Sanitize name to prevent path traversal and command injection
+    // Only allow alphanumeric, dots, underscores, and hyphens
+    const sanitizedName = newItem.name.replace(/[^a-zA-Z0-9._-]/g, '');
+    if (!sanitizedName || sanitizedName !== newItem.name) {
+      toast.error('Invalid name. Only alphanumeric characters, dots, underscores, and hyphens are allowed.');
       return;
     }
 

@@ -25,6 +25,7 @@ import Addons from './pages/Addons';
 import Settings from './pages/Settings';
 import Alerts from './pages/Alerts';
 import GroupDashboard from './pages/GroupDashboard';
+import SSHIdentities from './pages/SSHIdentities';
 
 function PrivateRoute({ children }) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -92,6 +93,7 @@ export default function App() {
         />
         <Route path="ips" element={<IpOverview />} />
         <Route path="alerts" element={<Alerts />} />
+        <Route path="ssh-identities" element={<SSHIdentities />} />
         <Route
           path="activity"
           element={<AdminRoute><ActivityLog /></AdminRoute>}
