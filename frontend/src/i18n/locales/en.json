@@ -390,5 +390,21 @@
     "minutes": "minutes",
     "hours": "hours",
     "days": "days"
+  },
+  "agent": {
+    "installAgent": "Install Agent",
+    "installTitle": "Install Agent",
+    "installSubtitle": "Run this command on the target server",
+    "copyCommand": "Copy to clipboard",
+    "copied": "Copied!",
+    "requirements": "Requirements",
+    "requirementRoot": "Root access (sudo)",
+    "requirementPython": "curl and Python 3 (will be installed automatically)",
+    "requirementNetwork": "Network access to this management server",
+    "afterInstall": "After installation, the agent will:",
+    "metricsInterval": "Report system metrics every 5 seconds",
+    "heartbeatInterval": "Send heartbeats every 30 seconds",
+    "packageSync": "Sync installed packages hourly",
+    "agentInstalled": "Agent Installed"
   }
 }

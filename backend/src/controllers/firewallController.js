@@ -123,8 +123,8 @@ exports.getStatus = async (req, res) => {
 
     conn = await createConnection(server);
 
-    // Check if UFW is available
-    const ufwCheck = await execCommand(conn, 'which ufw 2>/dev/null');
+    // Check if UFW is available - check multiple locations and methods
+    const ufwCheck = await execCommand(conn, 'command -v ufw || which ufw || test -x /usr/sbin/ufw && echo /usr/sbin/ufw || test -x /sbin/ufw && echo /sbin/ufw 2>/dev/null');
     const hasUfw = ufwCheck.stdout.trim().length > 0;
 
     let status = {
@@ -134,11 +134,15 @@ exports.getStatus = async (req, res) => {
     };
 
     if (hasUfw) {
-      // Get UFW status
-      const ufwStatus = await execCommand(conn, 'sudo ufw status verbose 2>/dev/null');
+      // UFW is installed, mark type as ufw
+      status.type = 'ufw';
 
-      if (ufwStatus.code === 0) {
-        status.type = 'ufw';
+      // Get UFW status - try with full path and handle sudo timeout
+      const ufwStatus = await execCommand(conn, 'sudo /usr/sbin/ufw status verbose 2>&1 || sudo ufw status verbose 2>&1');
+
+      // Check if UFW command worked (code 0 or stdout contains status info)
+      const ufwWorked = ufwStatus.code === 0 || ufwStatus.stdout.includes('Status:');
+      if (ufwWorked) {
         status.enabled = ufwStatus.stdout.includes('Status: active');
 
         // Parse UFW rules
@@ -172,6 +176,10 @@ exports.getStatus = async (req, res) => {
           status.defaultIncoming = defaultMatch[1].toLowerCase();
           status.defaultOutgoing = defaultMatch[2].toLowerCase();
         }
+      } else {
+        // UFW exists but we couldn't get status (sudo issue?)
+        status.error = 'Could not get UFW status. Check sudo permissions.';
+        logger.warn('UFW status command failed:', ufwStatus.stderr || ufwStatus.stdout);
       }
     } else {
       // Fall back to iptables
@@ -236,11 +244,11 @@ exports.toggle = async (req, res) => {
     conn = await createConnection(server);
 
     // Check if UFW is available
-    const ufwCheck = await execCommand(conn, 'which ufw 2>/dev/null');
+    const ufwCheck = await execCommand(conn, 'command -v ufw || which ufw || test -x /usr/sbin/ufw && echo /usr/sbin/ufw 2>/dev/null');
     const hasUfw = ufwCheck.stdout.trim().length > 0;
 
     if (hasUfw) {
-      const command = enable ? 'sudo ufw --force enable' : 'sudo ufw disable';
+      const command = enable ? 'sudo /usr/sbin/ufw --force enable' : 'sudo /usr/sbin/ufw disable';
       const result = await execCommand(conn, command);
 
       if (result.code !== 0) {
@@ -299,8 +307,8 @@ exports.addRule = async (req, res) => {
 
     conn = await createConnection(server);
 
-    // Build UFW command
-    let command = `sudo ufw ${action.toLowerCase()}`;
+    // Build UFW command (use full path for reliability)
+    let command = `sudo /usr/sbin/ufw ${action.toLowerCase()}`;
 
     if (direction === 'out') {
       command += ' out';
@@ -365,7 +373,7 @@ exports.deleteRule = async (req, res) => {
     conn = await createConnection(server);
 
     // Delete rule by number (need to confirm with --force)
-    const result = await execCommand(conn, `sudo ufw --force delete ${ruleNumber}`);
+    const result = await execCommand(conn, `sudo /usr/sbin/ufw --force delete ${ruleNumber}`);
 
     conn.end();
 
@@ -417,7 +425,7 @@ exports.setDefault = async (req, res) => {
 
     conn = await createConnection(server);
 
-    const result = await execCommand(conn, `sudo ufw default ${policy} ${direction}`);
+    const result = await execCommand(conn, `sudo /usr/sbin/ufw default ${policy} ${direction}`);
 
     conn.end();
 
@@ -456,7 +464,7 @@ exports.getNumberedRules = async (req, res) => {
 
     conn = await createConnection(server);
 
-    const result = await execCommand(conn, 'sudo ufw status numbered 2>/dev/null');
+    const result = await execCommand(conn, 'sudo /usr/sbin/ufw status numbered 2>&1');
 
     conn.end();
 

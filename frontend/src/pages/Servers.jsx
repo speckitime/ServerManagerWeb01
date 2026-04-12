@@ -11,6 +11,7 @@ export default function Servers() {
   const [showModal, setShowModal] = useState(false);
   const [editServer, setEditServer] = useState(null);
   const [filter, setFilter] = useState({ search: '', os_type: '', group_id: '', status: '' });
+  const [installServer, setInstallServer] = useState(null);
   const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
@@ -249,6 +250,17 @@ export default function Servers() {
                   </div>
                   {user?.role === 'admin' && (
                     <div className="flex gap-2">
+                      {server.os_type === 'linux' && !server.agent_installed && (
+                        <button
+                          onClick={() => setInstallServer(server)}
+                          className="p-1.5 text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-md transition-all"
+                          title="Install Agent"
+                        >
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                          </svg>
+                        </button>
+                      )}
                       <button onClick={() => openEdit(server)} className="p-1.5 text-gray-400 hover:text-primary-600 hover:bg-primary-50 dark:hover:bg-primary-900/20 rounded-md transition-all">
                         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
@@ -274,6 +286,13 @@ export default function Servers() {
           groups={groups}
           onClose={() => { setShowModal(false); setEditServer(null); }}
           onSaved={() => { setShowModal(false); setEditServer(null); loadData(); }}
+        />
+      )}
+
+      {installServer && (
+        <InstallAgentModal
+          server={installServer}
+          onClose={() => setInstallServer(null)}
         />
       )}
     </div>
@@ -518,6 +537,121 @@ function ServerFormModal({ server, groups, onClose, onSaved }) {
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function InstallAgentModal({ server, onClose }) {
+  const [installData, setInstallData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const loadInstallCommand = async () => {
+      try {
+        const { data } = await api.get(`/agent/command/${server.id}`);
+        setInstallData(data);
+      } catch (err) {
+        toast.error('Failed to load install command');
+      } finally {
+        setLoading(false);
+      }
+    };
+    loadInstallCommand();
+  }, [server.id]);
+
+  const copyToClipboard = () => {
+    if (installData?.command) {
+      navigator.clipboard.writeText(installData.command);
+      setCopied(true);
+      toast.success('Copied to clipboard!');
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4 animate-fade-in">
+      <div className="card w-full max-w-2xl animate-scale-in shadow-2xl">
+        <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between bg-gradient-to-r from-emerald-50 to-white dark:from-gray-800 dark:to-gray-800">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+              <svg className="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+              </svg>
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Install Agent</h2>
+              <p className="text-sm text-gray-500">{server.display_name || server.hostname}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-all">&times;</button>
+        </div>
+
+        <div className="p-6 space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="animate-spin h-8 w-8 border-4 border-primary-500 border-t-transparent rounded-full" />
+            </div>
+          ) : (
+            <>
+              <div>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
+                  Run this command on <strong>{server.display_name || server.hostname}</strong> ({server.ip_address}) as root:
+                </p>
+                <div className="relative">
+                  <pre className="bg-gray-900 text-green-400 p-4 rounded-xl text-sm font-mono overflow-x-auto">
+                    {installData?.command || 'Error loading command'}
+                  </pre>
+                  <button
+                    onClick={copyToClipboard}
+                    className="absolute top-2 right-2 p-2 bg-gray-800 hover:bg-gray-700 rounded-lg text-gray-400 hover:text-white transition-colors"
+                    title="Copy to clipboard"
+                  >
+                    {copied ? (
+                      <svg className="h-5 w-5 text-green-400" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                      </svg>
+                    ) : (
+                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0013.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 01-.75.75H9a.75.75 0 01-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 01-2.25 2.25H6.75A2.25 2.25 0 014.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 011.927-.184" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-4">
+                <div className="flex gap-3">
+                  <svg className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+                  </svg>
+                  <div className="text-sm text-blue-800 dark:text-blue-200">
+                    <p className="font-medium mb-1">Requirements:</p>
+                    <ul className="list-disc list-inside space-y-1 text-blue-700 dark:text-blue-300">
+                      <li>Root access (sudo)</li>
+                      <li>curl and Python 3 (will be installed automatically)</li>
+                      <li>Network access to this management server</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                <p>After installation, the agent will:</p>
+                <ul className="list-disc list-inside mt-2 space-y-1">
+                  <li>Report system metrics every 5 seconds</li>
+                  <li>Send heartbeats every 30 seconds</li>
+                  <li>Sync installed packages hourly</li>
+                </ul>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="p-6 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+          <button onClick={onClose} className="btn-secondary">Close</button>
+        </div>
       </div>
     </div>
   );
