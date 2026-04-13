@@ -29,6 +29,7 @@ const alertRoutes = require('./routes/alerts');
 const fileManagerRoutes = require('./routes/fileManager');
 const firewallRoutes = require('./routes/firewall');
 const sshIdentityRoutes = require('./routes/sshIdentities');
+const agentInstallRoutes = require('./routes/agentInstall');
 
 const app = express();
 const server = http.createServer(app);
@@ -69,6 +70,9 @@ const loginLimiter = rateLimit({
   max: 10,
   message: { error: 'Too many login attempts, please try again later' },
 });
+
+// Agent install routes (before rate limiter - needs to be accessible from target servers)
+app.use('/api/agent', agentInstallRoutes);
 
 // API routes
 app.use('/api/auth/login', loginLimiter);

@@ -1,23 +1,25 @@
 import { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import useAuthStore from '../../store/authStore';
 import api from '../../services/api';
 
 const navigation = [
-  { name: 'Dashboard', href: '/', icon: DashboardIcon },
-  { name: 'Servers', href: '/servers', icon: ServerIcon },
-  { name: 'SSH Vault', href: '/ssh-identities', icon: KeyVaultIcon },
-  { name: 'Alerts', href: '/alerts', icon: AlertsIcon },
-  { name: 'Scripts', href: '/scripts', icon: ScriptsIcon, adminOnly: true },
-  { name: 'Addons', href: '/addons', icon: AddonsIcon, adminOnly: true },
-  { name: 'IP Addresses', href: '/ips', icon: IpIcon },
-  { name: 'Users', href: '/users', icon: UsersIcon, adminOnly: true },
-  { name: 'Activity Log', href: '/activity', icon: ActivityIcon, adminOnly: true },
-  { name: 'Settings', href: '/settings', icon: SettingsIcon, adminOnly: true },
+  { nameKey: 'nav.dashboard', href: '/', icon: DashboardIcon },
+  { nameKey: 'nav.servers', href: '/servers', icon: ServerIcon },
+  { nameKey: 'nav.sshVault', href: '/ssh-identities', icon: KeyVaultIcon },
+  { nameKey: 'nav.alerts', href: '/alerts', icon: AlertsIcon },
+  { nameKey: 'nav.scripts', href: '/scripts', icon: ScriptsIcon, adminOnly: true },
+  { nameKey: 'nav.addons', href: '/addons', icon: AddonsIcon, adminOnly: true },
+  { nameKey: 'nav.ipAddresses', href: '/ips', icon: IpIcon },
+  { nameKey: 'nav.users', href: '/users', icon: UsersIcon, adminOnly: true },
+  { nameKey: 'nav.activityLog', href: '/activity', icon: ActivityIcon, adminOnly: true },
+  { nameKey: 'nav.settings', href: '/settings', icon: SettingsIcon, adminOnly: true },
 ];
 
 export default function Sidebar({ open, onClose }) {
   const user = useAuthStore((s) => s.user);
+  const { t } = useTranslation();
   const [version, setVersion] = useState('');
 
   useEffect(() => {
@@ -56,7 +58,7 @@ export default function Sidebar({ open, onClose }) {
         <nav className="mt-4 px-3 space-y-1">
           {filteredNav.map((item) => (
             <NavLink
-              key={item.name}
+              key={item.nameKey}
               to={item.href}
               onClick={onClose}
               className={({ isActive }) =>
@@ -69,7 +71,7 @@ export default function Sidebar({ open, onClose }) {
               end={item.href === '/'}
             >
               <item.icon className="h-5 w-5 flex-shrink-0" />
-              {item.name}
+              {t(item.nameKey)}
             </NavLink>
           ))}
         </nav>
