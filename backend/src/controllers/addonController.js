@@ -311,7 +311,7 @@ exports.checkAddonStatus = async (req, res) => {
 exports.executeAddonAction = async (req, res) => {
   try {
     const { serverId, addonId } = req.params;
-    const { action, container, jail, ip } = req.body;
+    const { action, container, jail, ip, ...actionConfig } = req.body;
 
     const server = await db('servers').where({ id: serverId }).first();
     if (!server) {
@@ -339,7 +339,8 @@ exports.executeAddonAction = async (req, res) => {
     const serverAddon = await db('server_addons')
       .where({ server_id: serverId, addon_id: addonId })
       .first();
-    const config = serverAddon?.config ? parseJsonField(serverAddon.config) : {};
+    const storedConfig = serverAddon?.config ? parseJsonField(serverAddon.config) : {};
+    const config = { ...storedConfig, ...actionConfig };
 
     // Handle addon-specific actions with structured responses
     switch (addon.slug) {
@@ -367,12 +368,14 @@ async function handleCloudflareTunnelAction(server, credentials, config, action,
       case 'status': {
         // Get service status and tunnel info
         const cmd = `
+          echo "=== INSTALLED ===" && command -v cloudflared >/dev/null 2>&1 && echo "yes" || echo "no";
           echo "=== SERVICE_STATUS ===" && systemctl is-active cloudflared 2>/dev/null || echo "inactive";
           echo "=== TUNNEL_LIST ===" && cloudflared tunnel list --output json 2>/dev/null || echo "[]";
           echo "=== CONFIG ===" && cat /etc/cloudflared/config.yml 2>/dev/null || echo "not-found"
         `;
         const output = await executeSSHCommand(server, credentials, cmd);
 
+        const installed = output.includes('=== INSTALLED ===') && output.split('=== INSTALLED ===')[1]?.includes('yes');
         const serviceRunning = output.includes('active') && !output.includes('inactive');
         let tunnels = [];
         let ingress = [];
@@ -401,6 +404,7 @@ async function handleCloudflareTunnelAction(server, credentials, config, action,
         }
 
         return res.json({
+          installed,
           running: serviceRunning,
           status: serviceRunning ? 'running' : 'stopped',
           tunnel: tunnels.length > 0 ? tunnels[0] : null,
@@ -408,6 +412,92 @@ async function handleCloudflareTunnelAction(server, credentials, config, action,
           ingress,
           connections: tunnels.length > 0 ? (tunnels[0].connections?.length || 1) : 0
         });
+      }
+
+      case 'install': {
+        // Install cloudflared - try apt, then rpm, then binary
+        const installCmd = `
+          if command -v apt-get >/dev/null 2>&1; then
+            curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
+            echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main' | sudo tee /etc/apt/sources.list.d/cloudflared.list
+            sudo apt-get update && sudo apt-get install -y cloudflared
+          elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y cloudflared || (curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared && sudo mv /tmp/cloudflared /usr/local/bin/cloudflared && sudo chmod +x /usr/local/bin/cloudflared)
+          else
+            curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o /tmp/cloudflared && sudo mv /tmp/cloudflared /usr/local/bin/cloudflared && sudo chmod +x /usr/local/bin/cloudflared
+          fi
+          cloudflared --version
+        `;
+        const output = await executeSSHCommand(server, credentials, installCmd);
+        return res.json({ success: true, output });
+      }
+
+      case 'create-tunnel': {
+        const tunnelName = config.tunnelName;
+        if (!tunnelName) {
+          return res.status(400).json({ error: 'Tunnel name required' });
+        }
+        const cmd = `cloudflared tunnel create ${tunnelName} 2>&1`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        // Extract tunnel ID from output
+        const idMatch = output.match(/Created tunnel ([^\s]+) with id ([a-f0-9-]+)/i);
+        return res.json({
+          success: !output.includes('error'),
+          tunnelId: idMatch ? idMatch[2] : null,
+          output
+        });
+      }
+
+      case 'setup-config': {
+        const tunnelId = config.tunnelId;
+        const ingress = config.ingress || [];
+        if (!tunnelId) {
+          return res.status(400).json({ error: 'Tunnel ID required' });
+        }
+        // Build config.yml content
+        let configContent = `tunnel: ${tunnelId}\ncredentials-file: /root/.cloudflared/${tunnelId}.json\n\ningress:\n`;
+        for (const route of ingress) {
+          if (route.hostname && route.service) {
+            configContent += `  - hostname: ${route.hostname}\n    service: ${route.service}\n`;
+          }
+        }
+        configContent += `  - service: http_status:404\n`;
+
+        const cmd = `
+          sudo mkdir -p /etc/cloudflared
+          echo '${configContent.replace(/'/g, "'\\''")}' | sudo tee /etc/cloudflared/config.yml
+          sudo cloudflared service install 2>/dev/null || true
+          sudo systemctl enable cloudflared 2>/dev/null || true
+        `;
+        await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: true });
+      }
+
+      case 'add-route': {
+        const tunnelId = config.tunnelId;
+        const hostname = config.hostname;
+        if (!tunnelId || !hostname) {
+          return res.status(400).json({ error: 'Tunnel ID and hostname required' });
+        }
+        const cmd = `cloudflared tunnel route dns ${tunnelId} ${hostname} 2>&1`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: !output.includes('error'), output });
+      }
+
+      case 'delete-tunnel': {
+        const tunnelId = config.tunnelId;
+        if (!tunnelId) {
+          return res.status(400).json({ error: 'Tunnel ID required' });
+        }
+        const cmd = `cloudflared tunnel delete ${tunnelId} 2>&1`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: !output.includes('error'), output });
+      }
+
+      case 'get-logs': {
+        const cmd = `sudo journalctl -u cloudflared -n 100 --no-pager 2>/dev/null || echo "No logs available"`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        return res.json({ logs: output });
       }
 
       case 'start':
@@ -438,14 +528,25 @@ async function handleWireGuardAction(server, credentials, config, action, res) {
     switch (action) {
       case 'status': {
         const cmd = `
+          echo "=== INSTALLED ===" && command -v wg >/dev/null 2>&1 && echo "yes" || echo "no";
           echo "=== INTERFACE ===" && ip link show ${wgInterface} 2>/dev/null && echo "UP" || echo "DOWN";
           echo "=== WG_SHOW ===" && sudo wg show ${wgInterface} 2>/dev/null || echo "not-running";
-          echo "=== TRANSFER ===" && sudo wg show ${wgInterface} transfer 2>/dev/null || echo ""
+          echo "=== TRANSFER ===" && sudo wg show ${wgInterface} transfer 2>/dev/null || echo "";
+          echo "=== SERVER_CONFIG ===" && sudo cat /etc/wireguard/${wgInterface}.conf 2>/dev/null | grep -E "^(Address|ListenPort)" || echo ""
         `;
         const output = await executeSSHCommand(server, credentials, cmd);
 
+        const installed = output.includes('=== INSTALLED ===') && output.split('=== INSTALLED ===')[1]?.includes('yes');
         const isUp = output.includes('state UP') || (output.includes('interface:') && !output.includes('not-running'));
         const peers = [];
+
+        // Parse server config
+        let serverAddress = '';
+        let listenPort = 51820;
+        const addrMatch = output.match(/Address\s*=\s*(\S+)/);
+        if (addrMatch) serverAddress = addrMatch[1];
+        const portMatch = output.match(/ListenPort\s*=\s*(\d+)/);
+        if (portMatch) listenPort = parseInt(portMatch[1]);
 
         // Parse WireGuard show output
         const wgShowMatch = output.match(/=== WG_SHOW ===\s*([\s\S]*?)(=== TRANSFER ===|$)/);
@@ -468,7 +569,6 @@ async function handleWireGuardAction(server, credentials, config, action, res) {
               const handshakeMatch = block.match(/latest handshake:\s*(.+)/);
               if (handshakeMatch) {
                 const hsText = handshakeMatch[1];
-                // Convert relative time to timestamp
                 const now = Math.floor(Date.now() / 1000);
                 if (hsText.includes('second')) {
                   const secs = parseInt(hsText) || 0;
@@ -494,7 +594,7 @@ async function handleWireGuardAction(server, credentials, config, action, res) {
         }
 
         // Parse transfer stats if separate
-        const transferMatch = output.match(/=== TRANSFER ===\s*([\s\S]*?)$/);
+        const transferMatch = output.match(/=== TRANSFER ===\s*([\s\S]*?)(=== SERVER_CONFIG ===|$)/);
         if (transferMatch && transferMatch[1]) {
           const lines = transferMatch[1].trim().split('\n');
           for (const line of lines) {
@@ -511,10 +611,161 @@ async function handleWireGuardAction(server, credentials, config, action, res) {
         }
 
         return res.json({
+          installed,
           running: isUp,
-          interface: { name: wgInterface, up: isUp },
+          interface: { name: wgInterface, up: isUp, address: serverAddress, port: listenPort },
           peers
         });
+      }
+
+      case 'install': {
+        const installCmd = `
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y wireguard wireguard-tools qrencode
+          elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y epel-release && sudo yum install -y wireguard-tools qrencode
+          elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y wireguard-tools qrencode
+          fi
+          wg --version
+        `;
+        const output = await executeSSHCommand(server, credentials, installCmd);
+        return res.json({ success: true, output });
+      }
+
+      case 'setup-server': {
+        const address = config.address || '10.0.0.1/24';
+        const port = config.listenPort || 51820;
+        const cmd = `
+          # Generate server keys if not exist
+          sudo mkdir -p /etc/wireguard
+          if [ ! -f /etc/wireguard/server_private.key ]; then
+            wg genkey | sudo tee /etc/wireguard/server_private.key | wg pubkey | sudo tee /etc/wireguard/server_public.key
+            sudo chmod 600 /etc/wireguard/server_private.key
+          fi
+          PRIVATE_KEY=$(sudo cat /etc/wireguard/server_private.key)
+          PUBLIC_KEY=$(sudo cat /etc/wireguard/server_public.key)
+
+          # Create server config
+          sudo tee /etc/wireguard/${wgInterface}.conf << EOF
+[Interface]
+Address = ${address}
+ListenPort = ${port}
+PrivateKey = \$PRIVATE_KEY
+PostUp = iptables -A FORWARD -i %i -j ACCEPT; iptables -t nat -A POSTROUTING -o eth0 -j MASQUERADE
+PostDown = iptables -D FORWARD -i %i -j ACCEPT; iptables -t nat -D POSTROUTING -o eth0 -j MASQUERADE
+EOF
+
+          # Enable IP forwarding
+          sudo sysctl -w net.ipv4.ip_forward=1
+          echo "net.ipv4.ip_forward=1" | sudo tee -a /etc/sysctl.conf 2>/dev/null || true
+
+          sudo systemctl enable wg-quick@${wgInterface} 2>/dev/null || true
+          echo "PUBLIC_KEY:\$PUBLIC_KEY"
+        `;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        const pubKeyMatch = output.match(/PUBLIC_KEY:(\S+)/);
+        return res.json({
+          success: true,
+          publicKey: pubKeyMatch ? pubKeyMatch[1] : null,
+          output
+        });
+      }
+
+      case 'generate-client-config': {
+        const clientName = config.clientName || 'client';
+        const clientIp = config.clientIp || '10.0.0.2/32';
+        const dns = config.dns || '1.1.1.1';
+        const serverEndpoint = config.serverEndpoint || server.ip_address;
+        const serverPort = config.serverPort || 51820;
+
+        const cmd = `
+          # Get server public key
+          SERVER_PUBKEY=$(sudo cat /etc/wireguard/server_public.key 2>/dev/null)
+          if [ -z "\$SERVER_PUBKEY" ]; then
+            echo "ERROR:Server not configured"
+            exit 1
+          fi
+
+          # Generate client keys
+          CLIENT_PRIVKEY=$(wg genkey)
+          CLIENT_PUBKEY=$(echo \$CLIENT_PRIVKEY | wg pubkey)
+
+          # Add peer to server config
+          sudo tee -a /etc/wireguard/${wgInterface}.conf << EOF
+
+[Peer]
+# ${clientName}
+PublicKey = \$CLIENT_PUBKEY
+AllowedIPs = ${clientIp.split('/')[0]}/32
+EOF
+
+          # Reload WireGuard if running
+          sudo wg syncconf ${wgInterface} <(sudo wg-quick strip ${wgInterface}) 2>/dev/null || true
+
+          # Generate client config
+          echo "=== CLIENT_CONFIG ==="
+          cat << EOF
+[Interface]
+PrivateKey = \$CLIENT_PRIVKEY
+Address = ${clientIp}
+DNS = ${dns}
+
+[Peer]
+PublicKey = \$SERVER_PUBKEY
+AllowedIPs = 0.0.0.0/0
+Endpoint = ${serverEndpoint}:${serverPort}
+PersistentKeepalive = 25
+EOF
+          echo "=== END_CONFIG ==="
+          echo "CLIENT_PUBKEY:\$CLIENT_PUBKEY"
+        `;
+        const output = await executeSSHCommand(server, credentials, cmd);
+
+        if (output.includes('ERROR:')) {
+          const errorMatch = output.match(/ERROR:(.+)/);
+          return res.status(400).json({ error: errorMatch ? errorMatch[1] : 'Failed to generate config' });
+        }
+
+        const configMatch = output.match(/=== CLIENT_CONFIG ===\s*([\s\S]*?)=== END_CONFIG ===/);
+        const pubKeyMatch = output.match(/CLIENT_PUBKEY:(\S+)/);
+
+        let qrCode = null;
+        if (config.generateQr && configMatch) {
+          try {
+            const qrCmd = `echo '${configMatch[1].trim().replace(/'/g, "'\\''")}' | qrencode -t ANSIUTF8 2>/dev/null || echo "QR_NOT_AVAILABLE"`;
+            const qrOutput = await executeSSHCommand(server, credentials, qrCmd);
+            if (!qrOutput.includes('QR_NOT_AVAILABLE')) {
+              qrCode = qrOutput;
+            }
+          } catch (e) {
+            // QR generation failed, continue without it
+          }
+        }
+
+        return res.json({
+          success: true,
+          config: configMatch ? configMatch[1].trim() : null,
+          clientPublicKey: pubKeyMatch ? pubKeyMatch[1] : null,
+          qrCode
+        });
+      }
+
+      case 'remove-peer': {
+        const publicKey = config.publicKey;
+        if (!publicKey) {
+          return res.status(400).json({ error: 'Public key required' });
+        }
+        // Remove peer from running interface
+        await executeSSHCommand(server, credentials, `sudo wg set ${wgInterface} peer ${publicKey} remove`);
+        // Remove from config file (more complex, need to parse and rewrite)
+        const cmd = `
+          sudo cp /etc/wireguard/${wgInterface}.conf /etc/wireguard/${wgInterface}.conf.bak
+          sudo awk '/\\[Peer\\]/{p=1; block=""} p{block=block $0 "\\n"; if(/^$/ || /^\\[/){if(block !~ /${publicKey.substring(0, 20)}/){printf "%s", block} block=""; if(/^\\[/ && !/\\[Peer\\]/){p=0; print}}} !p' /etc/wireguard/${wgInterface}.conf.bak | sudo tee /etc/wireguard/${wgInterface}.conf.new
+          sudo mv /etc/wireguard/${wgInterface}.conf.new /etc/wireguard/${wgInterface}.conf 2>/dev/null || true
+        `;
+        await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: true });
       }
 
       case 'start':
@@ -601,11 +852,13 @@ async function handleFail2BanAction(server, credentials, config, action, jail, i
     switch (action) {
       case 'status': {
         const cmd = `
+          echo "=== INSTALLED ===" && command -v fail2ban-client >/dev/null 2>&1 && echo "yes" || echo "no";
           echo "=== SERVICE ===" && systemctl is-active fail2ban 2>/dev/null || echo "inactive";
           echo "=== JAILS ===" && sudo fail2ban-client status 2>/dev/null || echo "not-available"
         `;
         const output = await executeSSHCommand(server, credentials, cmd);
 
+        const installed = output.includes('=== INSTALLED ===') && output.split('=== INSTALLED ===')[1]?.includes('yes');
         const isRunning = output.includes('active') && !output.includes('inactive');
         const jails = [];
 
@@ -623,36 +876,213 @@ async function handleFail2BanAction(server, credentials, config, action, jail, i
               const jailMatch = jailOutput.match(new RegExp(`=== JAIL:${jailName} ===\\s*([\\s\\S]*?)(?==== JAIL:|$)`));
               if (jailMatch) {
                 const jailData = jailMatch[1];
-                const jail = { name: jailName, enabled: true };
+                const jailObj = { name: jailName, enabled: true };
 
                 const failedMatch = jailData.match(/Currently failed:\s*(\d+)/);
-                if (failedMatch) jail.currently_failed = parseInt(failedMatch[1]);
+                if (failedMatch) jailObj.currently_failed = parseInt(failedMatch[1]);
 
                 const bannedMatch = jailData.match(/Currently banned:\s*(\d+)/);
-                if (bannedMatch) jail.currently_banned = parseInt(bannedMatch[1]);
+                if (bannedMatch) jailObj.currently_banned = parseInt(bannedMatch[1]);
 
                 const bannedIpsMatch = jailData.match(/Banned IP list:\s*(.+)/);
                 if (bannedIpsMatch && bannedIpsMatch[1].trim()) {
-                  jail.banned_ips = bannedIpsMatch[1].trim().split(/\s+/).filter(ip => ip);
+                  jailObj.banned_ips = bannedIpsMatch[1].trim().split(/\s+/).filter(ip => ip);
                 } else {
-                  jail.banned_ips = [];
+                  jailObj.banned_ips = [];
                 }
 
-                jails.push(jail);
+                jails.push(jailObj);
               }
             }
           }
         }
 
         return res.json({
+          installed,
           running: isRunning,
           jails
         });
       }
 
+      case 'install': {
+        const installCmd = `
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y fail2ban
+          elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y epel-release && sudo yum install -y fail2ban
+          elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y fail2ban
+          fi
+          sudo systemctl enable fail2ban
+          sudo systemctl start fail2ban
+          fail2ban-client --version
+        `;
+        const output = await executeSSHCommand(server, credentials, installCmd);
+        return res.json({ success: true, output });
+      }
+
+      case 'get-available-jails': {
+        const cmd = `ls /etc/fail2ban/filter.d/*.conf 2>/dev/null | xargs -n1 basename 2>/dev/null | sed 's/\\.conf$//' | sort`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        const availableJails = output.trim().split('\n').filter(j => j);
+        return res.json({ jails: availableJails });
+      }
+
+      case 'enable-jail': {
+        const jailName = config.jailName || jail;
+        const port = config.port || 'ssh';
+        const maxretry = config.maxretry || 5;
+        const bantime = config.bantime || '10m';
+        const findtime = config.findtime || '10m';
+
+        if (!jailName) {
+          return res.status(400).json({ error: 'Jail name required' });
+        }
+
+        const jailConfig = `[${jailName}]
+enabled = true
+port = ${port}
+maxretry = ${maxretry}
+bantime = ${bantime}
+findtime = ${findtime}
+`;
+        const cmd = `
+          echo '${jailConfig}' | sudo tee /etc/fail2ban/jail.d/${jailName}.local
+          sudo fail2ban-client reload
+        `;
+        await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: true });
+      }
+
+      case 'disable-jail': {
+        const jailName = config.jailName || jail;
+        if (!jailName) {
+          return res.status(400).json({ error: 'Jail name required' });
+        }
+        const cmd = `
+          sudo rm -f /etc/fail2ban/jail.d/${jailName}.local
+          sudo fail2ban-client reload
+        `;
+        await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: true });
+      }
+
+      case 'ban':
+        if (!jail || !ip) return res.status(400).json({ error: 'Jail and IP required' });
+        await executeSSHCommand(server, credentials, `sudo fail2ban-client set ${jail} banip ${ip}`);
+        return res.json({ success: true });
+
       case 'unban':
         if (!jail || !ip) return res.status(400).json({ error: 'Jail and IP required' });
         await executeSSHCommand(server, credentials, `sudo fail2ban-client set ${jail} unbanip ${ip}`);
+        return res.json({ success: true });
+
+      case 'get-whitelist': {
+        const cmd = `sudo cat /etc/fail2ban/jail.local 2>/dev/null | grep -E "^ignoreip" || sudo cat /etc/fail2ban/jail.conf 2>/dev/null | grep -E "^ignoreip" || echo "ignoreip = 127.0.0.1/8"`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        const match = output.match(/ignoreip\s*=\s*(.+)/);
+        const ips = match ? match[1].trim().split(/\s+/).filter(ip => ip) : ['127.0.0.1/8'];
+        return res.json({ whitelist: ips });
+      }
+
+      case 'whitelist': {
+        const whitelistIp = config.ip || ip;
+        if (!whitelistIp) return res.status(400).json({ error: 'IP required' });
+
+        // Get current whitelist and add new IP
+        const getCurrentCmd = `sudo cat /etc/fail2ban/jail.local 2>/dev/null | grep -E "^ignoreip" || echo "ignoreip = 127.0.0.1/8"`;
+        const current = await executeSSHCommand(server, credentials, getCurrentCmd);
+        const match = current.match(/ignoreip\s*=\s*(.+)/);
+        const currentIps = match ? match[1].trim() : '127.0.0.1/8';
+
+        if (!currentIps.includes(whitelistIp)) {
+          const newIgnoreIp = `${currentIps} ${whitelistIp}`;
+          const cmd = `
+            sudo mkdir -p /etc/fail2ban
+            if [ -f /etc/fail2ban/jail.local ]; then
+              sudo sed -i 's/^ignoreip.*/ignoreip = ${newIgnoreIp}/' /etc/fail2ban/jail.local
+            else
+              echo -e "[DEFAULT]\\nignoreip = ${newIgnoreIp}" | sudo tee /etc/fail2ban/jail.local
+            fi
+            sudo fail2ban-client reload
+          `;
+          await executeSSHCommand(server, credentials, cmd);
+        }
+        return res.json({ success: true });
+      }
+
+      case 'remove-whitelist': {
+        const removeIp = config.ip || ip;
+        if (!removeIp) return res.status(400).json({ error: 'IP required' });
+
+        const getCurrentCmd = `sudo cat /etc/fail2ban/jail.local 2>/dev/null | grep -E "^ignoreip" || echo "ignoreip = 127.0.0.1/8"`;
+        const current = await executeSSHCommand(server, credentials, getCurrentCmd);
+        const match = current.match(/ignoreip\s*=\s*(.+)/);
+        const currentIps = match ? match[1].trim().split(/\s+/).filter(i => i && i !== removeIp).join(' ') : '127.0.0.1/8';
+
+        const cmd = `
+          if [ -f /etc/fail2ban/jail.local ]; then
+            sudo sed -i 's/^ignoreip.*/ignoreip = ${currentIps}/' /etc/fail2ban/jail.local
+          fi
+          sudo fail2ban-client reload
+        `;
+        await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: true });
+      }
+
+      case 'get-config': {
+        const cmd = `
+          echo "=== BANTIME ===" && sudo fail2ban-client get DEFAULT bantime 2>/dev/null || echo "600";
+          echo "=== FINDTIME ===" && sudo fail2ban-client get DEFAULT findtime 2>/dev/null || echo "600";
+          echo "=== MAXRETRY ===" && sudo fail2ban-client get DEFAULT maxretry 2>/dev/null || echo "5"
+        `;
+        const output = await executeSSHCommand(server, credentials, cmd);
+
+        const bantimeMatch = output.match(/=== BANTIME ===\s*(\d+)/);
+        const findtimeMatch = output.match(/=== FINDTIME ===\s*(\d+)/);
+        const maxretryMatch = output.match(/=== MAXRETRY ===\s*(\d+)/);
+
+        return res.json({
+          bantime: bantimeMatch ? parseInt(bantimeMatch[1]) : 600,
+          findtime: findtimeMatch ? parseInt(findtimeMatch[1]) : 600,
+          maxretry: maxretryMatch ? parseInt(maxretryMatch[1]) : 5
+        });
+      }
+
+      case 'update-config': {
+        const bantime = config.bantime || 600;
+        const findtime = config.findtime || 600;
+        const maxretry = config.maxretry || 5;
+
+        const configContent = `[DEFAULT]
+bantime = ${bantime}
+findtime = ${findtime}
+maxretry = ${maxretry}
+`;
+        const cmd = `
+          echo '${configContent}' | sudo tee /etc/fail2ban/jail.d/defaults.local
+          sudo fail2ban-client reload
+        `;
+        await executeSSHCommand(server, credentials, cmd);
+        return res.json({ success: true });
+      }
+
+      case 'get-logs': {
+        const cmd = `sudo tail -n 100 /var/log/fail2ban.log 2>/dev/null || echo "No logs available"`;
+        const output = await executeSSHCommand(server, credentials, cmd);
+        return res.json({ logs: output });
+      }
+
+      case 'start':
+        await executeSSHCommand(server, credentials, 'sudo systemctl start fail2ban');
+        return res.json({ success: true });
+
+      case 'stop':
+        await executeSSHCommand(server, credentials, 'sudo systemctl stop fail2ban');
+        return res.json({ success: true });
+
+      case 'restart':
+        await executeSSHCommand(server, credentials, 'sudo systemctl restart fail2ban');
         return res.json({ success: true });
 
       default:
